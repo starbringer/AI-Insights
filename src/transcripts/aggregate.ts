@@ -213,6 +213,44 @@ export function getTopTurns(db: Database, limit = 10): {
   ).all(limit);
 }
 
+export interface TopSessionStat {
+  session_id: string;
+  title: string | null;
+  cwd: string | null;
+  model: string | null;
+  turn_count: number;
+  last_seen_at: string | null;
+  input: number;
+  cacheCreate5m: number;
+  cacheCreate1h: number;
+  cacheRead: number;
+  output: number;
+  total: number;
+}
+
+export function getTopSessions(db: Database, limit = 10): TopSessionStat[] {
+  return db.query<TopSessionStat, [number]>(
+    `SELECT
+       s.session_id, s.title, s.cwd, s.last_seen_at, s.turn_count,
+       t.model, t.input, t.cacheCreate5m, t.cacheCreate1h, t.cacheRead, t.output, t.total
+     FROM sessions s
+     INNER JOIN (
+       SELECT session_id,
+         MAX(model)           as model,
+         SUM(input_tokens)    as input,
+         SUM(cache_create_5m) as cacheCreate5m,
+         SUM(cache_create_1h) as cacheCreate1h,
+         SUM(cache_read)      as cacheRead,
+         SUM(output_tokens)   as output,
+         SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
+       FROM turns
+       GROUP BY session_id
+     ) t ON s.session_id = t.session_id
+     ORDER BY t.total DESC
+     LIMIT ?`
+  ).all(limit);
+}
+
 export function getActiveSessions(db: Database, windowMs = 5 * 60_000): number {
   const since = new Date(Date.now() - windowMs).toISOString();
   const row = db.query<{ n: number }, [string]>(

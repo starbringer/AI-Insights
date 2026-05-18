@@ -51,6 +51,7 @@ bun run build        # compile to dist/llm-usage.exe (Windows x64)
 - Daily 30-day token trend chart (stacked: input / output / cache write / cache read)
 - Token usage by model — stacked horizontal bar
 - Top 10 projects by tokens — horizontal bar
+- Top 10 sessions by tokens — stacked horizontal bar; click a bar to jump to that session's detail page
 
 ### Audit
 Data-driven findings about your Claude Code configuration:
@@ -143,7 +144,7 @@ src/
   watcher.ts               chokidar watcher → incremental DB updates
   api/
     auditEndpoints.ts      GET/POST /api/audit, GET/PUT /api/thresholds, pricing
-    transcriptEndpoints.ts /api/stats, /api/daily, /api/models, /api/sessions, /api/projects
+    transcriptEndpoints.ts /api/stats, /api/timeseries, /api/models, /api/sessions, /api/projects, /api/top-sessions
     providersEndpoint.ts   GET /api/providers
 static/
   index.html               4-tab SPA shell

@@ -221,16 +221,18 @@ function loadTab(tab) {
 async function loadDashboard() {
   try {
     const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
-    const [stats, series, models, projects] = await Promise.all([
+    const [stats, series, models, projects, topSessions] = await Promise.all([
       api('/stats'),
       api('/timeseries?days=30'),
       api(`/models?since=${ago30}`),
       api('/projects'),
+      api('/top-sessions?limit=10'),
     ]);
     renderKpiCards(stats);
     renderTrendChart(series);
     renderModelsChart(models);
     renderProjectsChart(projects);
+    renderTopSessionsChart(topSessions);
   } catch (e) {
     document.getElementById('kpi-row').innerHTML = `<p class="text-error">${esc(e.message)}</p>`;
   }
@@ -320,6 +322,66 @@ function renderProjectsChart(projects) {
         return `${esc(proj.cwd ?? '?')}<br>${fmt.tokens(proj.totalTokens)} tokens · ${proj.sessionCount} sessions`;
       },
     },
+  });
+}
+
+function renderTopSessionsChart(sessions) {
+  const chart = initChart('chart-top-sessions');
+  if (!chart) return;
+  if (!sessions?.length) {
+    chart.clear();
+    chart.setOption({ ...BASE_OPTION, title: { text: 'No sessions yet', left: 'center', top: 'middle', textStyle: { color: COLOR.dim, fontSize: 13, fontWeight: 'normal' } } });
+    return;
+  }
+
+  // Reverse so the #1 session lands at the top of the horizontal bar chart
+  const rows = [...sessions].reverse();
+  const labels = rows.map(s => {
+    const t = (s.title ?? '').trim() || '(untitled)';
+    return t.length > 42 ? t.slice(0, 41) + '…' : t;
+  });
+
+  chart.setOption({
+    ...BASE_OPTION,
+    grid: { left: 240, right: 100, top: 28, bottom: 8 },
+    legend: { data: ['Input', 'Output', 'Cache write', 'Cache read'], top: 0, textStyle: { color: COLOR.dim, fontSize: 11 } },
+    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: '#1e2130' } } },
+    yAxis: {
+      type: 'category',
+      data: labels,
+      axisLabel: { color: COLOR.dim, fontSize: 11, width: 230, overflow: 'truncate' },
+      axisTick: { show: false },
+    },
+    series: [
+      { name: 'Input',       type: 'bar', stack: 's', data: rows.map(r => r.input),                                            itemStyle: { color: COLOR.input } },
+      { name: 'Output',      type: 'bar', stack: 's', data: rows.map(r => r.output),                                           itemStyle: { color: COLOR.output } },
+      { name: 'Cache write', type: 'bar', stack: 's', data: rows.map(r => (r.cacheCreate5m ?? 0) + (r.cacheCreate1h ?? 0)),    itemStyle: { color: COLOR.cacheCreate } },
+      { name: 'Cache read',  type: 'bar', stack: 's', data: rows.map(r => r.cacheRead),                                        itemStyle: { color: COLOR.cacheRead },
+        label: { show: true, position: 'right', formatter: p => fmt.tokens(rows[p.dataIndex].total), color: COLOR.dim, fontSize: 10 } },
+    ],
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: ps => {
+        const s = rows[ps[0].dataIndex];
+        const lines = [
+          `<b>${esc(s.title ?? '(untitled)')}</b>`,
+          esc(s.cwd ?? '—'),
+          `${s.turn_count ?? 0} turns · ${esc((s.model ?? '').replace('claude-', ''))}`,
+          ...ps.map(p => `${p.marker} ${p.seriesName}: ${fmt.tokens(p.value)}`),
+          `<b>Total: ${fmt.tokens(s.total)}</b>`,
+        ];
+        return lines.join('<br>');
+      },
+    },
+  });
+
+  // Click a bar to jump to that session's detail page
+  chart.off('click');
+  chart.on('click', params => {
+    if (params.componentType !== 'series') return;
+    const s = rows[params.dataIndex];
+    if (s?.session_id) openSessionDetail(s.session_id, s.title ?? '', s.cwd ?? '');
   });
 }
 

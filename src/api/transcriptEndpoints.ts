@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { getDb } from "../db";
 import {
   getTotals, getDailySeries, getSessions, getProjects,
-  getModelStats, getCacheHitRate, getTopTurns, getActiveSessions,
+  getModelStats, getCacheHitRate, getTopTurns, getTopSessions, getActiveSessions,
 } from "../transcripts/aggregate";
 import { loadSessionDetail } from "../transcripts/sessionDetail";
 
@@ -53,6 +53,12 @@ transcriptRouter.get("/top-turns", c => {
   const db = getDb();
   const limit = parseInt(c.req.query("limit") ?? "10", 10);
   return c.json(getTopTurns(db, limit));
+});
+
+transcriptRouter.get("/top-sessions", c => {
+  const db = getDb();
+  const limit = parseInt(c.req.query("limit") ?? "10", 10);
+  return c.json(getTopSessions(db, limit));
 });
 
 transcriptRouter.get("/session/:sessionId", c => {
