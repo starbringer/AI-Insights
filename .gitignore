@@ -1,0 +1,35 @@
+# Dependencies & builds
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local data (DB is rebuilt from JSONL at startup)
+data/*
+!data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+server-out.txt
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dev artifacts (kept locally, not shipped)
+count_turns.mjs
+plan.md

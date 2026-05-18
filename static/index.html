@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Usage Monitor</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <span class="logo">⬡</span>
+      <h1>Claude Usage Monitor</h1>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="audit">Audit</button>
+      <button class="tab-btn" data-tab="sessions">Sessions</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+    </nav>
+    <div class="header-right">
+      <button id="btn-rerun" class="btn-sm">↻ Re-run audit</button>
+      <a href="https://claude.ai/settings/usage" target="_blank" rel="noopener" class="btn-sm btn-outline">
+        Open claude.ai ↗
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <!-- Dashboard -->
+    <section id="tab-dashboard" class="tab-content">
+      <div class="kpi-row" id="kpi-row">
+        <div class="kpi-card skeleton" style="--w:5"></div>
+        <div class="kpi-card skeleton" style="--w:5"></div>
+        <div class="kpi-card skeleton" style="--w:5"></div>
+        <div class="kpi-card skeleton" style="--w:5"></div>
+        <div class="kpi-card skeleton" style="--w:5"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-title">30-day token trend</div>
+        <div id="chart-trend" style="height:260px"></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <div class="chart-card-title">Token usage by model (30 days)</div>
+          <div id="chart-models" style="height:220px"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">Top projects by tokens (30 days)</div>
+          <div id="chart-projects" style="height:220px"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Audit -->
+    <section id="tab-audit" class="tab-content" hidden>
+      <div class="audit-grid" id="audit-grid">
+        <div class="audit-card skeleton" style="height:260px"></div>
+        <div class="audit-card skeleton" style="height:260px"></div>
+        <div class="audit-card skeleton" style="height:260px"></div>
+        <div class="audit-card skeleton" style="height:260px"></div>
+      </div>
+    </section>
+
+    <!-- Sessions -->
+    <section id="tab-sessions" class="tab-content" hidden>
+      <div class="controls-row">
+        <input type="text" id="search-input" class="input-sm" placeholder="Search sessions…">
+        <select id="project-filter" class="input-sm"><option value="">All projects</option></select>
+        <span id="sessions-count" class="text-dim"></span>
+        <div style="flex:1"></div>
+        <button id="sessions-prev" class="btn-sm">‹ Prev</button>
+        <span id="sessions-page" class="text-dim" style="padding:0 8px">1</span>
+        <button id="sessions-next" class="btn-sm">Next ›</button>
+      </div>
+      <div id="sessions-table-wrap"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="tab-content" hidden>
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h2>Thresholds</h2>
+          <p class="text-dim">Click any value to edit inline. Changes save on Enter.</p>
+          <div id="thresholds-form"></div>
+        </div>
+        <div class="settings-card">
+          <h2>API-equivalent pricing (USD / 1M tokens)</h2>
+          <p class="text-dim">Used only for reference cost estimates — not real billing.</p>
+          <div id="pricing-form"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Session Detail (full page) -->
+  <div id="sd-page" hidden>
+    <div class="sd-topbar">
+      <button id="sd-back-btn" class="btn-sm">← Sessions</button>
+      <div class="sd-topbar-title">
+        <div class="sd-title" id="modal-title">Session</div>
+        <div class="sd-subtitle" id="modal-subtitle"></div>
+      </div>
+      <span id="sd-stats" class="text-dim sd-topbar-stats"></span>
+      <div class="sd-panel-tabs">
+        <button class="sd-panel-tab active" data-panel="map">Map</button>
+        <button class="sd-panel-tab" data-panel="detail">Detail</button>
+      </div>
+    </div>
+    <div class="sd-body" id="sd-body">
+      <div class="sd-canvas" id="sd-canvas"></div>
+      <div class="sd-detail" id="sd-detail">
+        <div class="sd-placeholder text-dim">← Click a node to view details</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/lib/echarts.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
