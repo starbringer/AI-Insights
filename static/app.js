@@ -219,23 +219,38 @@ function loadTab(tab) {
 // ===== Dashboard =====
 
 async function loadDashboard() {
-  try {
-    const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
-    const [stats, series, models, projects, topSessions] = await Promise.all([
-      api('/stats'),
-      api('/timeseries?days=30'),
-      api(`/models?since=${ago30}`),
-      api('/projects'),
-      api('/top-sessions?limit=10'),
-    ]);
-    renderKpiCards(stats);
-    renderTrendChart(series);
-    renderModelsChart(models);
-    renderProjectsChart(projects);
-    renderTopSessionsChart(topSessions);
-  } catch (e) {
-    document.getElementById('kpi-row').innerHTML = `<p class="text-error">${esc(e.message)}</p>`;
+  const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const calls = [
+    ['stats',        '/stats'],
+    ['series',       '/timeseries?days=30'],
+    ['models',       `/models?since=${ago30}`],
+    ['projects',     '/projects'],
+    ['topSessions',  '/top-sessions?limit=10'],
+  ];
+
+  // allSettled so a single missing endpoint (e.g. server not restarted after
+  // a new endpoint was added) doesn't blank out the whole dashboard.
+  const results = await Promise.allSettled(calls.map(([, path]) => api(path)));
+
+  const data = {};
+  const failures = [];
+  results.forEach((r, i) => {
+    const key = calls[i][0];
+    if (r.status === 'fulfilled') data[key] = r.value;
+    else { data[key] = null; failures.push({ path: calls[i][1], err: r.reason }); }
+  });
+
+  if (failures.length === calls.length) {
+    document.getElementById('kpi-row').innerHTML = `<p class="text-error">All dashboard endpoints failed: ${esc(failures[0].err.message)}</p>`;
+    return;
   }
+  for (const f of failures) console.warn(`Dashboard endpoint failed: ${f.path} —`, f.err.message);
+
+  if (data.stats)       renderKpiCards(data.stats);
+  if (data.series)      renderTrendChart(data.series);
+  if (data.models)      renderModelsChart(data.models);
+  if (data.projects)    renderProjectsChart(data.projects);
+  if (data.topSessions) renderTopSessionsChart(data.topSessions);
 }
 
 function renderKpiCards(stats) {
