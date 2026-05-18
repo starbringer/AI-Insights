@@ -121,20 +121,28 @@ let allProviders = [];
 let currentProviderId = null;
 
 async function loadProviders() {
-  let list = [];
+  let list = null;
+  let fetchError = null;
   try {
     list = await api('/providers');
   } catch (e) {
-    console.warn('Failed to load providers:', e);
+    fetchError = e;
+    console.warn('Failed to load /api/providers:', e);
   }
   allProviders = Array.isArray(list) ? list : [];
 
   const sel  = document.getElementById('provider-select');
   const wrap = document.getElementById('provider-switcher');
 
+  if (fetchError) {
+    wrap.hidden = true;
+    showEmptyBanner(`Could not reach /api/providers (${fetchError.message}). The server may be running an older build — restart it (Ctrl+C, then \`bun run server.ts\`) and reload this page.`);
+    return;
+  }
+
   if (allProviders.length === 0) {
     wrap.hidden = true;
-    showEmptyBanner('No data sources are configured.');
+    showEmptyBanner('No data sources are configured. Add an entry to src/providers/index.ts.');
     return;
   }
 
