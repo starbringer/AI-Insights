@@ -1,6 +1,8 @@
-# Claude Usage Monitor
+# LLM Usage Monitor
 
-A local web app that reads Claude Code's JSONL transcript files and gives you a live dashboard of your token usage, costs, session history, and configuration health.
+A local web app that turns raw LLM usage data into a live dashboard — token counts, costs, session history, and configuration health.
+
+Today it parses **Claude Code's JSONL transcripts**. The architecture is intentionally provider-agnostic so additional sources (Gemini, ChatGPT exports, local Ollama, etc.) can be plugged in over time.
 
 **No AI calls. No external services. All data stays on your machine.**
 
@@ -8,7 +10,8 @@ A local web app that reads Claude Code's JSONL transcript files and gives you a 
 
 - [Bun](https://bun.sh) ≥ 1.1 (tested on 1.3.13)
 - Windows (the browser-open command uses `cmd /c start`; other platforms work but won't auto-open)
-- Claude Code installed with data in `~/.claude/projects/`
+- At least one supported data source:
+  - **Claude Code** with data in `~/.claude/projects/` *(currently the only built-in source)*
 
 ## Quick Start
 
@@ -38,7 +41,7 @@ Environment variable `PORT` is also respected.
 bun run start        # same as bun run server.ts
 bun run dev          # hot-reload with --watch
 bun run typecheck    # tsc --noEmit (zero-error check)
-bun run build        # compile to dist/claude-usage.exe (Windows x64)
+bun run build        # compile to dist/llm-usage.exe (Windows x64)
 ```
 
 ## What It Shows
@@ -79,9 +82,15 @@ Color coding: user prompts (blue), activities/tool calls (teal), responses (gray
 - Edit warning/error thresholds for all audit metrics
 - Edit per-model pricing (input/output/cache tokens per million)
 
-## Data Source
+## Data Sources
+
+### Claude Code (current)
 
 The app reads `~/.claude/projects/**/*.jsonl`. These are Claude Code's local transcript files — they contain token usage data from the `usage` field of each API response message. No API keys are needed; all parsing is local.
+
+### Other providers (planned)
+
+The parsing layer lives under `src/transcripts/` and is the natural extension point for Gemini, ChatGPT exports, Ollama logs, or any other JSONL-shaped usage source. Aggregation, audit, pricing, and the UI all key off a model name, so a new provider mostly needs a parser that emits the existing `turns` shape.
 
 Token estimation for prompt injection cost (CLAUDE.md, hooks, MCP schemas) uses `js-tiktoken` with `cl100k_base` encoding, which runs locally in WASM.
 
@@ -139,7 +148,7 @@ The app only tracks **API token usage** recorded in JSONL transcripts. It does n
 
 ```bash
 bun run build
-# produces dist/claude-usage.exe (Windows x64, ~60MB, no Bun install needed)
+# produces dist/llm-usage.exe (Windows x64, ~60MB, no Bun install needed)
 ```
 
 The compiled binary embeds the Bun runtime. Static files in `static/` must be distributed alongside it.

@@ -46,7 +46,7 @@ function queryMcpSchema(command: string, args: string[]): { toolCount: number; s
 
   const initMsg = framed(JSON.stringify({
     jsonrpc: "2.0", id: 1, method: "initialize",
-    params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "claude-usage", version: "0.1.0" } },
+    params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "llm-usage", version: "0.1.0" } },
   }));
   const toolsMsg = framed(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }));
 

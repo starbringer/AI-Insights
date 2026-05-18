@@ -34,6 +34,6 @@ app.route("/api",       transcriptRouter);
 
 app.use("/*", serveStatic({ root: "./static" }));
 
-console.log(`Claude Usage Monitor → http://localhost:${PORT}`);
+console.log(`LLM Usage Monitor → http://localhost:${PORT}`);
 
 export default { port: PORT, fetch: app.fetch };
