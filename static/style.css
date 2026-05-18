@@ -56,6 +56,9 @@ h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
   border-left: 1px solid var(--border);
   height: 28px;
 }
+/* Author display rules above beat the user-agent [hidden]{display:none};
+   re-assert hidden with higher specificity to make hidden=true actually hide. */
+.provider-switcher[hidden] { display: none; }
 .provider-switcher label {
   font-size: 11px;
   text-transform: uppercase;
@@ -107,6 +110,7 @@ h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
   border-left: 3px solid var(--orange);
   border-radius: var(--radius);
 }
+.empty-banner[hidden] { display: none; }
 .empty-banner-icon {
   font-size: 24px;
   color: var(--orange);
