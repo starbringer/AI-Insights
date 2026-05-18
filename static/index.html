@@ -11,6 +11,11 @@
     <div class="header-left">
       <span class="logo">⬡</span>
       <h1>LLM Usage Monitor</h1>
+      <div class="provider-switcher" id="provider-switcher" hidden>
+        <label for="provider-select" class="text-dim">Source</label>
+        <select id="provider-select" aria-label="Data source"></select>
+        <span id="provider-data-pill" class="provider-pill" hidden></span>
+      </div>
     </div>
     <nav class="tabs">
       <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
@@ -27,6 +32,14 @@
   </header>
 
   <main>
+    <div id="empty-data-banner" class="empty-banner" hidden>
+      <div class="empty-banner-icon">∅</div>
+      <div class="empty-banner-body">
+        <div class="empty-banner-title">No usage data detected</div>
+        <div class="empty-banner-desc" id="empty-banner-desc"></div>
+      </div>
+    </div>
+
     <!-- Dashboard -->
     <section id="tab-dashboard" class="tab-content">
       <div class="kpi-row" id="kpi-row">

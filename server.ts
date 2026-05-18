@@ -7,6 +7,7 @@ import { scanAll } from "./src/transcripts/parser";
 import { startWatcher } from "./src/watcher";
 import { auditRouter } from "./src/api/auditEndpoints";
 import { transcriptRouter } from "./src/api/transcriptEndpoints";
+import { providersRouter } from "./src/api/providersEndpoint";
 
 const argv = Bun.argv.slice(2);
 const PORT = parseInt(Bun.env["PORT"] ?? argv.find(a => a.startsWith("--port="))?.split("=")[1] ?? "5757", 10);
@@ -29,8 +30,9 @@ if (!NO_BROWSER && !STATIC_ONLY) {
 
 const app = new Hono();
 
-app.route("/api/audit", auditRouter);
-app.route("/api",       transcriptRouter);
+app.route("/api/audit",     auditRouter);
+app.route("/api/providers", providersRouter);
+app.route("/api",           transcriptRouter);
 
 app.use("/*", serveStatic({ root: "./static" }));
 

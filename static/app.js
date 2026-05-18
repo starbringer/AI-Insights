@@ -115,6 +115,79 @@ const BASE_OPTION = {
   axisLabel: { color: COLOR.dim },
 };
 
+// ===== Providers =====
+
+let allProviders = [];
+let currentProviderId = null;
+
+async function loadProviders() {
+  let list = [];
+  try {
+    list = await api('/providers');
+  } catch (e) {
+    console.warn('Failed to load providers:', e);
+  }
+  allProviders = Array.isArray(list) ? list : [];
+
+  const sel  = document.getElementById('provider-select');
+  const wrap = document.getElementById('provider-switcher');
+
+  if (allProviders.length === 0) {
+    wrap.hidden = true;
+    showEmptyBanner('No data sources are configured.');
+    return;
+  }
+
+  sel.innerHTML = allProviders.map(p =>
+    `<option value="${esc(p.id)}"${p.hasData ? '' : ' disabled'}>${esc(p.label)}${p.hasData ? '' : ' — no data'}</option>`
+  ).join('');
+  wrap.hidden = false;
+
+  // Default selection: stored choice (still valid + has data) → first with data → first overall.
+  const stored = localStorage.getItem('provider');
+  const storedValid = allProviders.some(p => p.id === stored && p.hasData);
+  const firstWithData = allProviders.find(p => p.hasData);
+  currentProviderId = storedValid ? stored : (firstWithData?.id ?? allProviders[0].id);
+  sel.value = currentProviderId;
+
+  updateProviderUI();
+
+  sel.addEventListener('change', () => {
+    currentProviderId = sel.value;
+    localStorage.setItem('provider', currentProviderId);
+    updateProviderUI();
+    loadTab(currentTab);
+  });
+}
+
+function currentProviderInfo() {
+  return allProviders.find(p => p.id === currentProviderId) ?? null;
+}
+
+function updateProviderUI() {
+  const info = currentProviderInfo();
+  const pill = document.getElementById('provider-data-pill');
+  if (info && !info.hasData) {
+    pill.textContent = 'no data';
+    pill.hidden = false;
+    showEmptyBanner(`No data found for ${info.label}. Expected location: ${info.dataDir}`);
+  } else {
+    pill.hidden = true;
+    showEmptyBanner(null);
+  }
+}
+
+function showEmptyBanner(msg) {
+  const banner = document.getElementById('empty-data-banner');
+  const desc = document.getElementById('empty-banner-desc');
+  if (msg) {
+    desc.textContent = msg;
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
+}
+
 // ===== Tabs =====
 
 let currentTab = 'dashboard';
@@ -662,7 +735,7 @@ function renderPricing(p) {
 
 // ===== Init =====
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
@@ -704,6 +777,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sessionsState.page++;
     loadSessions(false);
   });
+
+  await loadProviders();
 
   const validTabs = ['dashboard', 'audit', 'sessions', 'settings'];
   const hashTab = location.hash.replace('#', '');

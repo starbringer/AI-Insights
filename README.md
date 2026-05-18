@@ -84,13 +84,34 @@ Color coding: user prompts (blue), activities/tool calls (teal), responses (gray
 
 ## Data Sources
 
+The header has a **Source ▾** switcher that lists every registered provider. The active selection is persisted to `localStorage`. On first launch the app picks the first provider that has data; if none do, the app still loads and shows a "No usage data detected" banner with the expected data location.
+
+Providers are declared in [`src/providers/index.ts`](src/providers/index.ts):
+
+```ts
+export interface Provider {
+  id: string;
+  label: string;
+  description: string;
+  dataDir: string;
+  hasData(): boolean;  // cheap presence check
+}
+```
+
+The `GET /api/providers` endpoint exposes them to the UI together with a `hasData` flag (computed at request time).
+
 ### Claude Code (current)
 
 The app reads `~/.claude/projects/**/*.jsonl`. These are Claude Code's local transcript files — they contain token usage data from the `usage` field of each API response message. No API keys are needed; all parsing is local.
 
-### Other providers (planned)
+### Adding a new provider (Gemini / ChatGPT / Ollama / …)
 
-The parsing layer lives under `src/transcripts/` and is the natural extension point for Gemini, ChatGPT exports, Ollama logs, or any other JSONL-shaped usage source. Aggregation, audit, pricing, and the UI all key off a model name, so a new provider mostly needs a parser that emits the existing `turns` shape.
+1. Add an entry to `PROVIDERS` with `hasData()` pointing at the source's data location.
+2. Build a parser under `src/transcripts/` (or a new sibling folder) that emits the same `turns` shape consumed by [`aggregate.ts`](src/transcripts/aggregate.ts).
+3. Wire ingestion in the startup scan / file watcher.
+4. (Optional) When you actually need per-source filtering in queries, thread the active provider id through the API and add a `provider` column to the `turns` table.
+
+Aggregation, audit, pricing, and the UI all key off a model name, so a new provider mostly only needs the parser.
 
 Token estimation for prompt injection cost (CLAUDE.md, hooks, MCP schemas) uses `js-tiktoken` with `cl100k_base` encoding, which runs locally in WASM.
 
@@ -104,6 +125,8 @@ src/
   tokenizer.ts             js-tiktoken wrapper
   pricing.ts               Per-model cost table + computeCost()
   thresholds.ts            Configurable warning thresholds
+  providers/
+    index.ts               Provider registry + hasData() probes
   transcripts/
     parser.ts              Incremental JSONL parsing with byte-offset tracking
     cache.ts               SQLite read/write helpers
@@ -121,6 +144,7 @@ src/
   api/
     auditEndpoints.ts      GET/POST /api/audit, GET/PUT /api/thresholds, pricing
     transcriptEndpoints.ts /api/stats, /api/daily, /api/models, /api/sessions, /api/projects
+    providersEndpoint.ts   GET /api/providers
 static/
   index.html               4-tab SPA shell
   style.css                Dark theme, CSS variables
