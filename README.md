@@ -1,5 +1,8 @@
 # LLM Usage Monitor
 
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-yellow)](https://buymeacoffee.com/starbringer)
+
 A local web app that turns raw LLM usage data into a live dashboard — token counts, costs, session history, and configuration health.
 
 Today it parses **Claude Code's JSONL transcripts**. The architecture is intentionally provider-agnostic so additional sources (Gemini, ChatGPT exports, local Ollama, etc.) can be plugged in over time.
@@ -44,6 +47,10 @@ bun run typecheck    # tsc --noEmit (zero-error check)
 bun run build        # compile to dist/llm-usage.exe (Windows x64)
 ```
 
+## Interface
+
+The UI is a **neomorphic / soft-UI** design — tactile minimal cards built from soft dual shadows, a warm amber accent, and a left sidebar for navigation. A **light** (warm cream) and **dark** (slate) theme are both included; toggle them with the **Theme** control at the bottom of the sidebar. The choice is persisted to `localStorage` and charts re-theme in place.
+
 ## What It Shows
 
 ### Dashboard
@@ -77,7 +84,7 @@ Paginated table of all sessions with token counts, model, project path, and last
 
 On mobile (≤ 640 px) the two panels are toggled via **Map / Detail** buttons in the top bar; tapping a node automatically switches to the Detail panel.
 
-Color coding: user prompts (blue), activities/tool calls (teal), responses (gray), sub-agent branches (purple).
+Color coding: user prompts (blue), activities/tool calls (green), responses (gray), sub-agent branches (purple).
 
 ### Settings
 - Edit warning/error thresholds for all audit metrics
@@ -85,7 +92,7 @@ Color coding: user prompts (blue), activities/tool calls (teal), responses (gray
 
 ## Data Sources
 
-The header has a **Source ▾** switcher that lists every registered provider. The active selection is persisted to `localStorage`. On first launch the app picks the first provider that has data; if none do, the app still loads and shows a "No usage data detected" banner with the expected data location.
+The top bar has a **Source ▾** switcher that lists every registered provider. The active selection is persisted to `localStorage`. On first launch the app picks the first provider that has data; if none do, the app still loads and shows a "No usage data detected" banner with the expected data location.
 
 Providers are declared in [`src/providers/index.ts`](src/providers/index.ts):
 
@@ -147,9 +154,9 @@ src/
     transcriptEndpoints.ts /api/stats, /api/timeseries, /api/models, /api/sessions, /api/projects, /api/top-sessions
     providersEndpoint.ts   GET /api/providers
 static/
-  index.html               4-tab SPA shell
-  style.css                Dark theme, CSS variables
-  app.js                   Vanilla JS: fetch, ECharts, session-detail flowchart
+  index.html               Sidebar SPA shell (4 tabs + session-detail overlay)
+  style.css                Neomorphic soft-UI theme — light + dark, CSS variables
+  app.js                   Vanilla JS: fetch, ECharts, theme toggle, session-detail flowchart
   lib/
     echarts.min.js         Apache ECharts 5.5.1 (offline, 1007KB)
 data/                      SQLite DB lives here (git-ignored)
@@ -181,3 +188,13 @@ The compiled binary embeds the Bun runtime. Static files in `static/` must be di
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## ☕ Support This Project
+
+If this dashboard has helped you understand (or rein in) your LLM token spend — or just saved you from squinting at JSONL files — consider buying me a coffee. It helps keep the lights on and the side projects shipping.
+
+**[☕ Buy Me a Coffee](https://buymeacoffee.com/starbringer)**
+
+No pressure — the software is and always will be free.

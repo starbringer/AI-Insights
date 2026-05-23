@@ -23,15 +23,21 @@ const fmt = {
   },
 };
 
+// Soft, warm data palette — readable on both the cream and slate themes.
 const COLOR = {
-  input:       '#4d8af0',
-  output:      '#f09a4d',
-  cacheCreate: '#9a4df0',
-  cacheRead:   '#4df09a',
-  ok:    '#4df09a',
-  warn:  '#f0d44d',
-  error: '#f04d4d',
-  dim:   '#7a7d96',
+  input:       '#5f93d1',
+  output:      '#e3a838',
+  cacheCreate: '#a98cd6',
+  cacheRead:   '#5fb98f',
+  ok:    '#5fb98f',
+  warn:  '#e3a838',
+  error: '#df7b6b',
+  dim:   '#9b9486',
+  blue:  '#5f93d1',
+  orange:'#e3a838',
+  green: '#5fb98f',
+  purple:'#a98cd6',
+  yellow:'#e3a838',
 };
 
 function statusIcon(s) {
@@ -96,24 +102,62 @@ function toast(msg, dur = 2500) {
 // ===== Charts =====
 
 const charts = {};
+
+// Read a CSS custom property off the document root.
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function gridLine() { return cssVar('--grid-line') || 'rgba(0,0,0,.08)'; }
+
+// Theme-aware colors for chart chrome, recomputed whenever the theme changes.
+function chartTheme() {
+  return {
+    dim:     cssVar('--text-dim') || '#999',
+    text:    cssVar('--text')     || '#333',
+    grid:    gridLine(),
+    surface: cssVar('--surface')  || '#fff',
+    border:  cssVar('--sh-dark')  || '#ccc',
+  };
+}
+
+// (Re)register the shared ECharts theme so tooltips match the active palette.
+function registerEchartsTheme() {
+  if (!window.echarts) return;
+  const t = chartTheme();
+  echarts.registerTheme('app', {
+    textStyle: { color: t.dim },
+    tooltip: {
+      backgroundColor: t.surface,
+      borderColor: t.border,
+      textStyle: { color: t.text },
+      extraCssText: 'border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.20);',
+    },
+  });
+}
+
 function initChart(id) {
   const el = document.getElementById(id);
   if (!el || !window.echarts) return null;
   charts[id]?.dispose();
-  const c = echarts.init(el, 'dark', { renderer: 'svg' });
+  const c = echarts.init(el, 'app', { renderer: 'svg' });
   const ro = new ResizeObserver(() => c.resize());
   ro.observe(el.parentElement ?? el);
   charts[id] = c;
   return c;
 }
 
-const BASE_OPTION = {
-  backgroundColor: 'transparent',
-  tooltip: { trigger: 'axis', confine: true },
-  grid: { left: 56, right: 12, top: 32, bottom: 24 },
-  textStyle: { color: COLOR.dim },
-  axisLabel: { color: COLOR.dim },
-};
+function baseOption() {
+  const t = chartTheme();
+  return {
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', confine: true },
+    // containLabel lets ECharts measure axis labels and keep them inside the
+    // canvas, so million-scale y-axis values are never clipped at the edge.
+    grid: { left: 8, right: 14, top: 32, bottom: 8, containLabel: true },
+    textStyle: { color: t.dim },
+    axisLabel: { color: t.dim },
+  };
+}
 
 // ===== Providers =====
 
@@ -201,11 +245,23 @@ function showEmptyBanner(msg) {
 let currentTab = 'dashboard';
 const tabData = {};
 
+const PAGE_META = {
+  dashboard: ['Dashboard', 'Token usage at a glance'],
+  audit:     ['Configuration Audit', 'Data-driven findings about your Claude Code setup'],
+  sessions:  ['Sessions', 'Browse and inspect every recorded session'],
+  settings:  ['Settings', 'Tune audit thresholds and reference pricing'],
+};
+
 function switchTab(tab) {
   currentTab = tab;
   location.hash = tab;
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.nav-item[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(s => s.hidden = s.id !== `tab-${tab}`);
+  const meta = PAGE_META[tab];
+  if (meta) {
+    document.getElementById('page-title').textContent = meta[0];
+    document.getElementById('page-subtitle').textContent = meta[1];
+  }
   loadTab(tab);
 }
 
@@ -253,22 +309,34 @@ async function loadDashboard() {
   if (data.topSessions) renderTopSessionsChart(data.topSessions);
 }
 
+const SVG_A = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+const KPI_ICONS = {
+  today:  `<svg ${SVG_A}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`,
+  week:   `<svg ${SVG_A}><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>`,
+  month:  `<svg ${SVG_A}><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M7.5 14h3M13.5 14h3"/></svg>`,
+  cache:  `<svg ${SVG_A}><path d="M13 2.5L4.5 13.5H11l-1 8 8.5-11H12z"/></svg>`,
+  active: `<svg ${SVG_A}><path d="M4 19v-5M10 19v-9M16 19v-13M22 19V8"/></svg>`,
+};
+
 function renderKpiCards(stats) {
   const { today, sevenDays, thirtyDays, cacheHitRate30d, activeSessions } = stats;
   const cacheStatus = cacheHitRate30d >= 50 ? 'ok' : 'warn';
   const cards = [
-    { label: 'Today',    value: fmt.tokens(today.total),       sub: `${fmt.tokens(today.input)} in · ${fmt.tokens(today.output)} out`, sub2: `~$${today.totalCost?.toFixed(2) ?? '?'} API-equiv` },
-    { label: '7 days',   value: fmt.tokens(sevenDays.total),   sub: `${fmt.tokens(sevenDays.input)} in · ${fmt.tokens(sevenDays.output)} out`, sub2: `~$${sevenDays.totalCost?.toFixed(2) ?? '?'} API-equiv` },
-    { label: '30 days',  value: fmt.tokens(thirtyDays.total),  sub: `${fmt.tokens(thirtyDays.input)} in · ${fmt.tokens(thirtyDays.output)} out`, sub2: `${fmt.usd(thirtyDays.totalCost)} API-equiv` },
-    { label: 'Cache hit', value: fmt.pct(cacheHitRate30d),     sub: '30-day avg', cls: cacheStatus },
-    { label: 'Active',   value: String(activeSessions),        sub: 'sessions (5 min window)' },
+    { icon: 'today',  label: 'Today',     value: fmt.tokens(today.total),       sub: `${fmt.tokens(today.input)} in · ${fmt.tokens(today.output)} out`, sub2: `~$${today.totalCost?.toFixed(2) ?? '?'} API-equiv` },
+    { icon: 'week',   label: '7 days',    value: fmt.tokens(sevenDays.total),   sub: `${fmt.tokens(sevenDays.input)} in · ${fmt.tokens(sevenDays.output)} out`, sub2: `~$${sevenDays.totalCost?.toFixed(2) ?? '?'} API-equiv` },
+    { icon: 'month',  label: '30 days',   value: fmt.tokens(thirtyDays.total),  sub: `${fmt.tokens(thirtyDays.input)} in · ${fmt.tokens(thirtyDays.output)} out`, sub2: `${fmt.usd(thirtyDays.totalCost)} API-equiv` },
+    { icon: 'cache',  label: 'Cache hit', value: fmt.pct(cacheHitRate30d),      sub: '30-day average', cls: cacheStatus },
+    { icon: 'active', label: 'Active',    value: String(activeSessions),        sub: 'sessions · 5 min window' },
   ];
   document.getElementById('kpi-row').innerHTML = cards.map(c => `
     <div class="kpi-card ${c.cls ?? ''}">
-      <div class="kpi-label">${c.label}</div>
-      <div class="kpi-value">${esc(c.value)}</div>
-      <div class="kpi-sub">${esc(c.sub ?? '')}</div>
-      ${c.sub2 ? `<div class="kpi-sub2">${esc(c.sub2)}</div>` : ''}
+      <div class="kpi-icon">${KPI_ICONS[c.icon] ?? ''}</div>
+      <div class="kpi-body">
+        <div class="kpi-label">${esc(c.label)}</div>
+        <div class="kpi-value">${esc(c.value)}</div>
+        <div class="kpi-sub">${esc(c.sub ?? '')}</div>
+        ${c.sub2 ? `<div class="kpi-sub2">${esc(c.sub2)}</div>` : ''}
+      </div>
     </div>
   `).join('');
 }
@@ -278,10 +346,10 @@ function renderTrendChart(series) {
   if (!chart) return;
   const dates = series.map(d => d.date);
   chart.setOption({
-    ...BASE_OPTION,
+    ...baseOption(),
     legend: { data: ['Input','Output','Cache write','Cache read'], top: 0, textStyle:{color:COLOR.dim} },
     xAxis: { type:'category', data:dates, axisLine:{lineStyle:{color:COLOR.dim}} },
-    yAxis: { type:'value', axisLabel:{formatter: v => fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:'#1e2130'}} },
+    yAxis: { type:'value', axisLabel:{formatter: v => fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
     series: [
       { name:'Input',       type:'bar', stack:'s', data:series.map(d=>d.input),                      itemStyle:{color:COLOR.input} },
       { name:'Output',      type:'bar', stack:'s', data:series.map(d=>d.output),                     itemStyle:{color:COLOR.output} },
@@ -297,10 +365,10 @@ function renderModelsChart(models) {
   const palette = [COLOR.input, COLOR.output, COLOR.cacheCreate, COLOR.cacheRead, '#f04d4d'];
   const names = models.map(m => m.model.replace('claude-', '').replace(/-(\d)/g, ' $1'));
   chart.setOption({
-    ...BASE_OPTION,
-    grid: { left: 90, right: 16, top: 8, bottom: 24 },
+    ...baseOption(),
+    grid: { left: 6, right: 16, top: 30, bottom: 6, containLabel: true },
     legend: { data: ['Input', 'Output', 'Cache write', 'Cache read'], top: 0, textStyle: { color: COLOR.dim, fontSize: 11 } },
-    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: '#1e2130' } } },
+    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
     yAxis: { type: 'category', data: names, axisLabel: { color: COLOR.dim, fontSize: 11 } },
     series: [
       { name: 'Input',       type: 'bar', stack: 's', data: models.map(m => m.input),                         itemStyle: { color: COLOR.input } },
@@ -321,9 +389,9 @@ function renderProjectsChart(projects) {
     return parts[parts.length - 1] || p.cwd || '(unknown)';
   });
   chart.setOption({
-    ...BASE_OPTION,
-    grid: { left: 110, right: 80, top: 8, bottom: 8 },
-    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: '#1e2130' } } },
+    ...baseOption(),
+    grid: { left: 6, right: 80, top: 8, bottom: 8, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
     yAxis: { type: 'category', data: names, axisLabel: { color: COLOR.dim, fontSize: 11 } },
     series: [{
       type: 'bar',
@@ -345,7 +413,7 @@ function renderTopSessionsChart(sessions) {
   if (!chart) return;
   if (!sessions?.length) {
     chart.clear();
-    chart.setOption({ ...BASE_OPTION, title: { text: 'No sessions yet', left: 'center', top: 'middle', textStyle: { color: COLOR.dim, fontSize: 13, fontWeight: 'normal' } } });
+    chart.setOption({ ...baseOption(), title: { text: 'No sessions yet', left: 'center', top: 'middle', textStyle: { color: COLOR.dim, fontSize: 13, fontWeight: 'normal' } } });
     return;
   }
 
@@ -357,10 +425,10 @@ function renderTopSessionsChart(sessions) {
   });
 
   chart.setOption({
-    ...BASE_OPTION,
+    ...baseOption(),
     grid: { left: 240, right: 100, top: 28, bottom: 8 },
     legend: { data: ['Input', 'Output', 'Cache write', 'Cache read'], top: 0, textStyle: { color: COLOR.dim, fontSize: 11 } },
-    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: '#1e2130' } } },
+    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
     yAxis: {
       type: 'category',
       data: labels,
@@ -452,10 +520,10 @@ function buildClaudeMdCard(d) {
     if (!chart || !d.dailySeries?.length) return;
     const dates = d.dailySeries.map(x => x.date);
     const vals  = d.dailySeries.map(x => x.injectedTokens);
-    chart.setOption({ ...BASE_OPTION,
-      grid: { left:56, right:12, top:16, bottom:24 },
+    chart.setOption({ ...baseOption(),
+      grid: { left:8, right:14, top:16, bottom:8, containLabel:true },
       xAxis: { type:'category', data:dates, axisLabel:{color:COLOR.dim} },
-      yAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:'#1e2130'}} },
+      yAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
       series: [{ type:'line', data:vals, smooth:true, areaStyle:{opacity:.3}, itemStyle:{color:COLOR.blue}, lineStyle:{color:COLOR.blue} }],
       tooltip: { trigger:'axis', formatter: p => `${p[0].name}: ${fmt.tokens(p[0].value)} injected` },
     });
@@ -478,9 +546,9 @@ function buildHooksCard(d) {
     const chart = initChart('chart-hooks');
     if (!chart || !d.fires7d?.length) return;
     const data = d.fires7d.map(f => ({ name: f.event, value: f.estimatedTokens }));
-    chart.setOption({ ...BASE_OPTION,
-      grid: { left:160, right:12, top:8, bottom:8 },
-      xAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:'#1e2130'}} },
+    chart.setOption({ ...baseOption(),
+      grid: { left:6, right:58, top:8, bottom:8, containLabel:true },
+      xAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
       yAxis: { type:'category', data:data.map(d=>d.name), axisLabel:{color:COLOR.dim} },
       series: [{ type:'bar', data:data.map(d=>d.value), itemStyle:{color:COLOR.purple},
         label:{show:true, position:'right', formatter:p=>fmt.tokens(p.value), color:COLOR.dim} }],
@@ -557,10 +625,10 @@ function buildCacheHitCard(report) {
         const total = (d.input ?? 0) + (d.cacheCreate5m ?? 0) + (d.cacheCreate1h ?? 0) + cr;
         return total ? +(cr / total * 100).toFixed(1) : 0;
       });
-      chart.setOption({ ...BASE_OPTION,
+      chart.setOption({ ...baseOption(),
         grid: { left:48, right:12, top:16, bottom:24 },
         xAxis: { type:'category', data:series.map(d=>d.date), axisLabel:{color:COLOR.dim} },
-        yAxis: { type:'value', min:0, max:100, axisLabel:{formatter:v=>`${v}%`, color:COLOR.dim}, splitLine:{lineStyle:{color:'#1e2130'}} },
+        yAxis: { type:'value', min:0, max:100, axisLabel:{formatter:v=>`${v}%`, color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
         series: [{
           type:'line', data:rates, smooth:true,
           areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(77,240,154,.3)'},{offset:1,color:'rgba(77,240,154,.02)'}] }},
@@ -633,7 +701,7 @@ function buildModelMixCard(d, report) {
     <li>Opus is 15× more expensive than Haiku per token</li>
     <li>Reserve Opus for complex reasoning; use Sonnet or Haiku for coding/editing</li>
   </ul>`;
-  const card = auditCard('Model mix', d.status, headline, 'chart-modelmix', 160, fix);
+  const card = auditCard('Model mix', d.status, headline, 'chart-modelmix', 210, fix);
   setTimeout(async () => {
     const chart = initChart('chart-modelmix');
     if (!chart) return;
@@ -641,13 +709,22 @@ function buildModelMixCard(d, report) {
       const models = await api('/models');
       if (!models.length) return;
       const palette = [COLOR.blue, COLOR.orange, COLOR.purple, COLOR.green, COLOR.yellow];
-      chart.setOption({ ...BASE_OPTION,
-        legend: { top:0, textStyle:{color:COLOR.dim} },
-        xAxis: { type:'category', data:models.map(m=>m.model.replace('claude-','').replace(/-(\d)/g,' $1')), axisLabel:{color:COLOR.dim, rotate:15} },
-        yAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:'#1e2130'}} },
-        series: [{ type:'bar', data:models.map((m,i)=>({value:m.total, itemStyle:{color:palette[i%palette.length]}})),
-          label:{show:true, position:'top', formatter:p=>fmt.tokens(p.value), color:COLOR.dim, fontSize:10} }],
-        tooltip: { formatter: p => `${p.name}: ${fmt.tokens(p.value)} tokens` },
+      // Horizontal bars: model names sit on the y-axis so they're never rotated
+      // or clipped; containLabel guarantees the longest name still fits, and the
+      // right margin leaves room for the token-count label. Largest model on top.
+      const rows = [...models].reverse();
+      const names = rows.map(m => m.model.replace('claude-','').replace(/-(\d)/g,' $1'));
+      chart.setOption({ ...baseOption(),
+        grid: { left: 6, right: 76, top: 14, bottom: 8, containLabel: true },
+        // Each bar carries its exact total as an end label, so the x-axis tick
+        // numbers are redundant — and they crowd into an unreadable pile on a
+        // narrow plot. Hide them; keep the split lines for a sense of scale.
+        xAxis: { type:'value', axisLabel:{show:false}, axisTick:{show:false}, splitLine:{lineStyle:{color:gridLine()}} },
+        yAxis: { type:'category', data:names, axisLabel:{color:COLOR.dim, fontSize:11}, axisTick:{show:false} },
+        series: [{ type:'bar', barMaxWidth:24,
+          data: rows.map((m,i)=>({value:m.total, itemStyle:{color:palette[i%palette.length]}})),
+          label:{show:true, position:'right', formatter:p=>fmt.tokens(p.value), color:COLOR.dim, fontSize:11} }],
+        tooltip: { trigger:'item', formatter: p => `${esc(p.name)}: ${fmt.tokens(p.value)} tokens` },
       });
     } catch { /* skip */ }
   }, 50);
@@ -821,8 +898,20 @@ function renderPricing(p) {
 // ===== Init =====
 
 document.addEventListener('DOMContentLoaded', async () => {
+  registerEchartsTheme();
+
   document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  // Light / dark theme toggle — persisted, re-themes charts in place.
+  document.getElementById('theme-toggle')?.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem('theme', next);
+    registerEchartsTheme();
+    loadTab(currentTab);
+    if (!document.getElementById('sd-page').hidden) refreshSessionDetail();
   });
 
   document.getElementById('btn-rerun').addEventListener('click', async () => {
@@ -879,13 +968,38 @@ function toolCategory(name) {
   return 'tool';
 }
 
-const FLOW_COLORS = {
-  user:       { bg: '#0c1a2e', border: '#4d8af0', text: '#7ab3f0' },
-  activities: { bg: '#0e1a14', border: '#4df09a', text: '#4df09a' },
-  response:   { bg: '#1a1a2a', border: '#7a7a9a', text: '#a0a0c0' },
-  agent:      { bg: '#180d2b', border: '#9a4df0', text: '#bf8af0' },
-  summary:    { bg: '#1a1a1a', border: '#3a3a4a', text: '#6a6a8a' },
-};
+// Theme-aware palette for the session-detail flowchart (plain SVG).
+function flowColors() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  if (dark) {
+    return {
+      shLight: '#3a3d47', shDark: '#191b20',
+      edge: '#565963', branch: '#b89ee0',
+      groupFill: 'rgba(240,185,74,0.06)', groupStroke: 'rgba(255,255,255,0.07)',
+      groupText: '#c7c2b6', accentA: '#6fa0db', accentB: '#b89ee0',
+      nodes: {
+        user:       { bg: '#2f323b', border: '#6fa0db', text: '#a4c4e8' },
+        activities: { bg: '#2f323b', border: '#6ec39c', text: '#8fcfac' },
+        response:   { bg: '#2f323b', border: '#8c8980', text: '#b6b2a7' },
+        agent:      { bg: '#2f323b', border: '#b89ee0', text: '#c9b3ea' },
+        summary:    { bg: '#2f323b', border: '#565963', text: '#8c8980' },
+      },
+    };
+  }
+  return {
+    shLight: '#ffffff', shDark: '#c8c3b6',
+    edge: '#bcb6a7', branch: '#a98cd6',
+    groupFill: 'rgba(220,162,42,0.06)', groupStroke: 'rgba(74,68,58,0.10)',
+    groupText: '#8a8478', accentA: '#5f93d1', accentB: '#a98cd6',
+    nodes: {
+      user:       { bg: '#ece9e1', border: '#5f93d1', text: '#3f6b9e' },
+      activities: { bg: '#ece9e1', border: '#5fb98f', text: '#3f8c68' },
+      response:   { bg: '#ece9e1', border: '#9a9488', text: '#6f6a60' },
+      agent:      { bg: '#ece9e1', border: '#a98cd6', text: '#7a5fb0' },
+      summary:    { bg: '#ece9e1', border: '#bcb6a7', text: '#8a8478' },
+    },
+  };
+}
 
 // Build a directed flowchart from session turns.
 // Each conversation round = 3 nodes: User Prompt → Activities → Response.
@@ -1035,6 +1149,7 @@ function renderFlowSVG(container, flowNodes, flowEdges, onNodeClick, flowGroups 
   const BRANCH_X = NW + 70;  // must match buildFlowGraph
   const GROUP_PAD_X = 24, GROUP_PAD_TOP = 48, GROUP_PAD_BOTTOM = 26;
   const hasGroups = flowGroups.length > 0;
+  const FC = flowColors();
 
   // Center the main column within the container (leave room for group padding on the left)
   const containerW = Math.max(container.clientWidth || 0, 300);
@@ -1054,16 +1169,16 @@ function renderFlowSVG(container, flowNodes, flowEdges, onNodeClick, flowGroups 
   const p = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" style="display:block">`,
     `<defs>
-      <marker id="fah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker>
-      <marker id="fahb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
-      <linearGradient id="grpGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#6b7fc4" stop-opacity="0.10"/>
-        <stop offset="100%" stop-color="#6b7fc4" stop-opacity="0.02"/>
-      </linearGradient>
+      <marker id="fah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${FC.edge}"/></marker>
+      <marker id="fahb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${FC.branch}"/></marker>
       <linearGradient id="grpAccent" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#7ab3f0" stop-opacity="0.85"/>
-        <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.75"/>
+        <stop offset="0%" stop-color="${FC.accentA}" stop-opacity="0.9"/>
+        <stop offset="100%" stop-color="${FC.accentB}" stop-opacity="0.8"/>
       </linearGradient>
+      <filter id="neo" x="-45%" y="-45%" width="190%" height="190%">
+        <feDropShadow dx="3" dy="3" stdDeviation="3.4" flood-color="${FC.shDark}" flood-opacity="0.95"/>
+        <feDropShadow dx="-3" dy="-3" stdDeviation="3.4" flood-color="${FC.shLight}" flood-opacity="0.95"/>
+      </filter>
     </defs>`,
   ];
 
@@ -1075,13 +1190,13 @@ function renderFlowSVG(container, flowNodes, flowEdges, onNodeClick, flowGroups 
     const gw = (g.hasBranch ? BRANCH_X + NW : NW) + GROUP_PAD_X * 2;
     const gh = (g.yEnd - g.yStart) + GROUP_PAD_TOP + GROUP_PAD_BOTTOM;
     // Card
-    p.push(`<rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" rx="16" fill="url(#grpGrad)" stroke="rgba(120,140,200,0.22)" stroke-width="1"/>`);
+    p.push(`<rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" rx="18" fill="${FC.groupFill}" stroke="${FC.groupStroke}" stroke-width="1"/>`);
     // Left accent strip
     p.push(`<rect x="${gx + 1}" y="${gy + 18}" width="3" height="${Math.max(0, gh - 36)}" rx="1.5" fill="url(#grpAccent)"/>`);
     // Round number chip (positioned above the first node, with breathing room)
     const chipW = 86, chipH = 20, chipX = gx + 16, chipY = gy + 12;
-    p.push(`<rect x="${chipX}" y="${chipY}" width="${chipW}" height="${chipH}" rx="10" fill="rgba(120,140,200,0.18)" stroke="rgba(120,140,200,0.40)" stroke-width="0.6"/>`);
-    p.push(`<text x="${chipX + chipW/2}" y="${chipY + 14}" text-anchor="middle" fill="#b6c4e8" font-size="10" font-weight="700" font-family="system-ui,sans-serif" letter-spacing="1.2">${esc(g.label)}</text>`);
+    p.push(`<rect x="${chipX}" y="${chipY}" width="${chipW}" height="${chipH}" rx="10" fill="${FC.groupFill}" stroke="${FC.groupStroke}" stroke-width="0.8"/>`);
+    p.push(`<text x="${chipX + chipW/2}" y="${chipY + 14}" text-anchor="middle" fill="${FC.groupText}" font-size="10" font-weight="700" font-family="system-ui,sans-serif" letter-spacing="1.2">${esc(g.label)}</text>`);
   }
 
   for (const e of flowEdges) {
@@ -1094,27 +1209,27 @@ function renderFlowSVG(container, flowNodes, flowEdges, onNodeClick, flowGroups 
       const x1 = sx + NW, y1 = s.y + oy + NH / 2;
       const x2 = tx, y2 = t.y + oy + NH / 2;
       const mx = (x1 + x2) / 2;
-      p.push(`<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" stroke="#7c3aed" stroke-width="1.5" fill="none" marker-end="url(#fahb)"/>`);
+      p.push(`<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" stroke="${FC.branch}" stroke-width="1.6" fill="none" marker-end="url(#fahb)"/>`);
     } else if (e.returnBranch) {
       // Return branch: right column → left column (sub-agent → final reply, dashed)
       const x1 = sx + NW / 2, y1 = s.y + oy + NH;
       const x2 = tx + NW / 2, y2 = t.y + oy;
       const midy = (y1 + y2) / 2;
-      p.push(`<path d="M${x1},${y1} C${x1},${midy} ${x2},${midy} ${x2},${y2}" stroke="#7c3aed" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#fahb)"/>`);
+      p.push(`<path d="M${x1},${y1} C${x1},${midy} ${x2},${midy} ${x2},${y2}" stroke="${FC.branch}" stroke-width="1.6" fill="none" stroke-dasharray="5,3" marker-end="url(#fahb)"/>`);
     } else {
       const lineX = sx + NW / 2;
-      p.push(`<line x1="${lineX}" y1="${s.y + oy + NH}" x2="${lineX}" y2="${t.y + oy - 5}" stroke="#4a5568" stroke-width="1.5" marker-end="url(#fah)"/>`);
+      p.push(`<line x1="${lineX}" y1="${s.y + oy + NH}" x2="${lineX}" y2="${t.y + oy - 5}" stroke="${FC.edge}" stroke-width="1.6" marker-end="url(#fah)"/>`);
     }
   }
 
   for (const node of flowNodes) {
-    const c = FLOW_COLORS[node.kind] || FLOW_COLORS.summary;
+    const c = FC.nodes[node.kind] || FC.nodes.summary;
     const nx = nodeX(node), ny = node.y + oy;
     const bold = node.kind === 'user' ? '600' : '500';
     const label = esc((node.name || '').replace(/\s+/g, ' ').trim());
     p.push(`<g class="fnode" data-nid="${esc(String(node.id))}" style="cursor:${node.actData ? 'pointer' : 'default'}">`);
     p.push(`<title>${label}</title>`);
-    p.push(`<rect x="${nx}" y="${ny}" width="${NW}" height="${NH}" rx="9" fill="${c.bg}" stroke="${c.border}" stroke-width="2"/>`);
+    p.push(`<rect x="${nx}" y="${ny}" width="${NW}" height="${NH}" rx="13" fill="${c.bg}" stroke="${c.border}" stroke-width="2" filter="url(#neo)"/>`);
     p.push(`<foreignObject x="${nx}" y="${ny}" width="${NW}" height="${NH}" pointer-events="none">`);
     p.push(`<div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:6px 14px;box-sizing:border-box;overflow:hidden"><span style="font:${bold} 12px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;color:${c.text};text-align:center;max-width:100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;word-break:break-word">${label}</span></div>`);
     p.push(`</foreignObject>`);
@@ -1129,13 +1244,17 @@ function renderFlowSVG(container, flowNodes, flowEdges, onNodeClick, flowGroups 
     const node = flowNodes.find(n => String(n.id) === nid);
     if (!node?.actData) return;
     el.addEventListener('click', () => onNodeClick(node));
-    const rect = el.querySelector('rect');
-    el.addEventListener('mouseenter', () => { if (rect) rect.style.filter = 'brightness(1.3)'; });
-    el.addEventListener('mouseleave', () => { if (rect) rect.style.filter = ''; });
   });
 }
 
+// Remembers the open session so a theme switch can re-render the flowchart.
+let openSessionArgs = null;
+function refreshSessionDetail() {
+  if (openSessionArgs) openSessionDetail(...openSessionArgs);
+}
+
 async function openSessionDetail(sessionId, title, cwd) {
+  openSessionArgs = [sessionId, title, cwd];
   const sdPage = document.getElementById('sd-page');
   const sdBody = document.getElementById('sd-body');
   const canvasEl = document.getElementById('sd-canvas');

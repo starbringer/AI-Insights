@@ -18,25 +18,19 @@ export interface McpAudit {
   totalSchemaTokens: number;
 }
 
-function framed(json: string): Buffer {
-  const body = Buffer.from(json, "utf-8");
-  const header = `Content-Length: ${body.length}\r\n\r\n`;
-  return Buffer.concat([Buffer.from(header), body]);
+// MCP's stdio transport frames each JSON-RPC message as a single line of JSON
+// terminated by a newline — NOT LSP-style "Content-Length" headers. Sending the
+// wrong framing makes servers reject every message, so the probe found 0 tools.
+function ndjson(...messages: unknown[]): Buffer {
+  return Buffer.from(messages.map(m => JSON.stringify(m)).join("\n") + "\n", "utf-8");
 }
 
-function parseFramed(raw: string): unknown[] {
+function parseNdjson(raw: string): unknown[] {
   const results: unknown[] = [];
-  let i = 0;
-  while (i < raw.length) {
-    const clMatch = raw.slice(i).match(/^Content-Length:\s*(\d+)\r\n\r\n/i);
-    if (!clMatch) break;
-    const headerLen = clMatch[0].length;
-    const bodyLen = parseInt(clMatch[1], 10);
-    const bodyStart = i + headerLen;
-    try {
-      results.push(JSON.parse(raw.slice(bodyStart, bodyStart + bodyLen)));
-    } catch { /* skip */ }
-    i = bodyStart + bodyLen;
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try { results.push(JSON.parse(trimmed)); } catch { /* skip non-JSON log lines */ }
   }
   return results;
 }
@@ -44,34 +38,34 @@ function parseFramed(raw: string): unknown[] {
 function queryMcpSchema(command: string, args: string[]): { toolCount: number; schemaTokens: number } {
   if (!command) return { toolCount: 0, schemaTokens: 0 };
 
-  const initMsg = framed(JSON.stringify({
-    jsonrpc: "2.0", id: 1, method: "initialize",
-    params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "llm-usage", version: "0.1.0" } },
-  }));
-  const toolsMsg = framed(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }));
+  // Full MCP handshake over stdio: initialize → initialized notification → tools/list.
+  const stdin = ndjson(
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: {
+        protocolVersion: "2024-11-05", capabilities: {},
+        clientInfo: { name: "llm-usage", version: "0.1.0" } } },
+    { jsonrpc: "2.0", method: "notifications/initialized" },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+  );
 
   try {
     const proc = Bun.spawnSync({
       cmd: [command, ...args],
-      stdin: Buffer.concat([initMsg, toolsMsg]),
+      stdin,
       stdout: "pipe",
       stderr: "ignore",
       env: process.env as Record<string, string>,
-      timeout: 4000,
+      timeout: 8000,
     });
 
-    if (proc.exitCode !== 0 && proc.exitCode !== null) return { toolCount: 0, schemaTokens: 0 };
-
-    const raw = proc.stdout.toString("utf-8");
-    const msgs = parseFramed(raw);
-
-    for (const msg of msgs) {
+    // Find the tools/list reply (id 2). Parse regardless of exit code — a server
+    // may answer correctly and then exit non-zero once stdin reaches EOF.
+    for (const msg of parseNdjson(proc.stdout.toString("utf-8"))) {
       const m = msg as { id?: number; result?: { tools?: unknown[] } };
       if (m.id === 2 && m.result?.tools) {
         return { toolCount: m.result.tools.length, schemaTokens: countTokensInObject(m.result.tools) };
       }
     }
-  } catch { /* timeout or crash */ }
+  } catch { /* spawn failed, timeout, or crash */ }
 
   return { toolCount: 0, schemaTokens: 0 };
 }
@@ -94,7 +88,9 @@ export function getMcpAudit(): McpAudit {
   const servers: McpServer[] = [];
 
   try {
-    const proc = Bun.spawnSync({ cmd: [CLAUDE_BIN, "mcp", "list"], stdout: "pipe", stderr: "pipe", timeout: 12000 });
+    // `claude mcp list` health-checks every server before printing, so give it
+    // enough headroom — a slow probe must not blank out the whole server list.
+    const proc = Bun.spawnSync({ cmd: [CLAUDE_BIN, "mcp", "list"], stdout: "pipe", stderr: "pipe", timeout: 20000 });
     const output = proc.stdout.toString("utf-8") + proc.stderr.toString("utf-8");
 
     // Output format: "<name>: <connection-info> - ✓ Connected" or "✗ Error..."

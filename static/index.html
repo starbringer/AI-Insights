@@ -4,118 +4,156 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LLM Usage Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <!-- Set theme before first paint to avoid a flash of the wrong palette -->
+  <script>document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light';</script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <div class="header-left">
-      <span class="logo">⬡</span>
-      <h1>LLM Usage Monitor</h1>
-      <div class="provider-switcher" id="provider-switcher" hidden>
-        <label for="provider-select" class="text-dim">Source</label>
-        <select id="provider-select" aria-label="Data source"></select>
-        <span id="provider-data-pill" class="provider-pill" hidden></span>
+  <div class="app-shell">
+
+    <!-- ===== Sidebar ===== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">⬡</span>
+        <span class="brand-name">LLM Monitor</span>
       </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-tab="dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+          <span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-tab="audit">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 5 16 3-8h3"/></svg>
+          <span class="nav-label">Audit</span>
+        </button>
+        <button class="nav-item" data-tab="sessions">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8.5" y1="6" x2="21" y2="6"/><line x1="8.5" y1="12" x2="21" y2="12"/><line x1="8.5" y1="18" x2="21" y2="18"/><circle cx="3.7" cy="6" r="1.6"/><circle cx="3.7" cy="12" r="1.6"/><circle cx="3.7" cy="18" r="1.6"/></svg>
+          <span class="nav-label">Sessions</span>
+        </button>
+        <button class="nav-item" data-tab="settings">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.5v3.2M12 18.3v3.2M21.5 12h-3.2M5.7 12H2.5M18.7 5.3l-2.3 2.3M7.6 16.4l-2.3 2.3M18.7 18.7l-2.3-2.3M7.6 7.6L5.3 5.3"/></svg>
+          <span class="nav-label">Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <button id="theme-toggle" class="nav-item theme-toggle" type="button" title="Toggle light / dark theme">
+          <svg class="nav-icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.8v2.6M12 19.6v2.6M4.4 4.4l1.9 1.9M17.7 17.7l1.9 1.9M1.8 12h2.6M19.6 12h2.6M4.4 19.6l1.9-1.9M17.7 6.3l1.9-1.9"/></svg>
+          <svg class="nav-icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.8A8.6 8.6 0 0 1 9.2 3.5a8.6 8.6 0 1 0 11.3 11.3z"/></svg>
+          <span class="nav-label">Theme</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ===== Main column ===== -->
+    <div class="main-col">
+      <header class="topbar">
+        <div class="topbar-head">
+          <h1 id="page-title">Dashboard</h1>
+          <p id="page-subtitle" class="topbar-sub">Token usage at a glance</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="provider-switcher" id="provider-switcher" hidden>
+            <span class="provider-label">Source</span>
+            <select id="provider-select" aria-label="Data source"></select>
+            <span id="provider-data-pill" class="provider-pill" hidden></span>
+          </div>
+          <button id="btn-rerun" class="btn">↻ Re-run audit</button>
+          <a href="https://claude.ai/settings/usage" target="_blank" rel="noopener" class="btn btn-accent">
+            Open claude.ai ↗
+          </a>
+        </div>
+      </header>
+
+      <main class="content">
+        <div id="empty-data-banner" class="empty-banner" hidden>
+          <div class="empty-banner-icon">∅</div>
+          <div class="empty-banner-body">
+            <div class="empty-banner-title">No usage data detected</div>
+            <div class="empty-banner-desc" id="empty-banner-desc"></div>
+          </div>
+        </div>
+
+        <!-- Dashboard -->
+        <section id="tab-dashboard" class="tab-content">
+          <div class="kpi-row" id="kpi-row">
+            <div class="kpi-card skeleton"></div>
+            <div class="kpi-card skeleton"></div>
+            <div class="kpi-card skeleton"></div>
+            <div class="kpi-card skeleton"></div>
+            <div class="kpi-card skeleton"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-title">30-day token trend</div>
+            <div id="chart-trend" style="height:260px"></div>
+          </div>
+          <div class="chart-row">
+            <div class="chart-card">
+              <div class="chart-card-title">Token usage by model (30 days)</div>
+              <div id="chart-models" style="height:220px"></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-title">Top projects by tokens (30 days)</div>
+              <div id="chart-projects" style="height:220px"></div>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-title">Top 10 sessions by tokens — click a bar to open its detail</div>
+            <div id="chart-top-sessions" style="height:340px"></div>
+          </div>
+        </section>
+
+        <!-- Audit -->
+        <section id="tab-audit" class="tab-content" hidden>
+          <div class="audit-grid" id="audit-grid">
+            <div class="audit-card skeleton" style="height:260px"></div>
+            <div class="audit-card skeleton" style="height:260px"></div>
+            <div class="audit-card skeleton" style="height:260px"></div>
+            <div class="audit-card skeleton" style="height:260px"></div>
+          </div>
+        </section>
+
+        <!-- Sessions -->
+        <section id="tab-sessions" class="tab-content" hidden>
+          <div class="controls-row">
+            <input type="text" id="search-input" class="input-sm" placeholder="Search sessions…">
+            <select id="project-filter" class="input-sm"><option value="">All projects</option></select>
+            <span id="sessions-count" class="text-dim"></span>
+            <div style="flex:1"></div>
+            <button id="sessions-prev" class="btn">‹ Prev</button>
+            <span id="sessions-page" class="page-pill">1</span>
+            <button id="sessions-next" class="btn">Next ›</button>
+          </div>
+          <div id="sessions-table-wrap"></div>
+        </section>
+
+        <!-- Settings -->
+        <section id="tab-settings" class="tab-content" hidden>
+          <div class="settings-grid">
+            <div class="settings-card">
+              <h2>Thresholds</h2>
+              <p class="text-dim">Click any value to edit inline. Changes save on Enter.</p>
+              <div id="thresholds-form"></div>
+            </div>
+            <div class="settings-card">
+              <h2>API-equivalent pricing (USD / 1M tokens)</h2>
+              <p class="text-dim">Used only for reference cost estimates — not real billing.</p>
+              <div id="pricing-form"></div>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
-    <nav class="tabs">
-      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-      <button class="tab-btn" data-tab="audit">Audit</button>
-      <button class="tab-btn" data-tab="sessions">Sessions</button>
-      <button class="tab-btn" data-tab="settings">Settings</button>
-    </nav>
-    <div class="header-right">
-      <button id="btn-rerun" class="btn-sm">↻ Re-run audit</button>
-      <a href="https://claude.ai/settings/usage" target="_blank" rel="noopener" class="btn-sm btn-outline">
-        Open claude.ai ↗
-      </a>
-    </div>
-  </header>
-
-  <main>
-    <div id="empty-data-banner" class="empty-banner" hidden>
-      <div class="empty-banner-icon">∅</div>
-      <div class="empty-banner-body">
-        <div class="empty-banner-title">No usage data detected</div>
-        <div class="empty-banner-desc" id="empty-banner-desc"></div>
-      </div>
-    </div>
-
-    <!-- Dashboard -->
-    <section id="tab-dashboard" class="tab-content">
-      <div class="kpi-row" id="kpi-row">
-        <div class="kpi-card skeleton" style="--w:5"></div>
-        <div class="kpi-card skeleton" style="--w:5"></div>
-        <div class="kpi-card skeleton" style="--w:5"></div>
-        <div class="kpi-card skeleton" style="--w:5"></div>
-        <div class="kpi-card skeleton" style="--w:5"></div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-card-title">30-day token trend</div>
-        <div id="chart-trend" style="height:260px"></div>
-      </div>
-      <div class="chart-row">
-        <div class="chart-card">
-          <div class="chart-card-title">Token usage by model (30 days)</div>
-          <div id="chart-models" style="height:220px"></div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-card-title">Top projects by tokens (30 days)</div>
-          <div id="chart-projects" style="height:220px"></div>
-        </div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-card-title">Top 10 sessions by tokens — click a bar to open its detail</div>
-        <div id="chart-top-sessions" style="height:340px"></div>
-      </div>
-    </section>
-
-    <!-- Audit -->
-    <section id="tab-audit" class="tab-content" hidden>
-      <div class="audit-grid" id="audit-grid">
-        <div class="audit-card skeleton" style="height:260px"></div>
-        <div class="audit-card skeleton" style="height:260px"></div>
-        <div class="audit-card skeleton" style="height:260px"></div>
-        <div class="audit-card skeleton" style="height:260px"></div>
-      </div>
-    </section>
-
-    <!-- Sessions -->
-    <section id="tab-sessions" class="tab-content" hidden>
-      <div class="controls-row">
-        <input type="text" id="search-input" class="input-sm" placeholder="Search sessions…">
-        <select id="project-filter" class="input-sm"><option value="">All projects</option></select>
-        <span id="sessions-count" class="text-dim"></span>
-        <div style="flex:1"></div>
-        <button id="sessions-prev" class="btn-sm">‹ Prev</button>
-        <span id="sessions-page" class="text-dim" style="padding:0 8px">1</span>
-        <button id="sessions-next" class="btn-sm">Next ›</button>
-      </div>
-      <div id="sessions-table-wrap"></div>
-    </section>
-
-    <!-- Settings -->
-    <section id="tab-settings" class="tab-content" hidden>
-      <div class="settings-grid">
-        <div class="settings-card">
-          <h2>Thresholds</h2>
-          <p class="text-dim">Click any value to edit inline. Changes save on Enter.</p>
-          <div id="thresholds-form"></div>
-        </div>
-        <div class="settings-card">
-          <h2>API-equivalent pricing (USD / 1M tokens)</h2>
-          <p class="text-dim">Used only for reference cost estimates — not real billing.</p>
-          <div id="pricing-form"></div>
-        </div>
-      </div>
-    </section>
-  </main>
+  </div>
 
   <div id="toast" class="toast" hidden></div>
 
   <!-- Session Detail (full page) -->
   <div id="sd-page" hidden>
     <div class="sd-topbar">
-      <button id="sd-back-btn" class="btn-sm">← Sessions</button>
+      <button id="sd-back-btn" class="btn">← Sessions</button>
       <div class="sd-topbar-title">
         <div class="sd-title" id="modal-title">Session</div>
         <div class="sd-subtitle" id="modal-subtitle"></div>
