@@ -21,14 +21,17 @@ export interface DailyStat {
   total: number;
 }
 
-export interface SessionSummary {
-  session_id: string;
+export interface AgentSummaryRow {
+  agent_id: string;
+  provider: string;
+  run_id: string;
   title: string | null;
   cwd: string | null;
   project_flat: string | null;
   model: string | null;
   is_subagent: number;
-  parent_session_id: string | null;
+  parent_agent_id: string | null;
+  agent_type: string | null;
   started_at: string | null;
   last_seen_at: string | null;
   turn_count: number;
@@ -50,10 +53,17 @@ export interface ModelStat {
   total: number;
 }
 
-function daysBefore(n: number): string {
+/**
+ * ISO timestamp of local midnight n days ago. Turn timestamps are stored as
+ * UTC ISO strings, so comparing against a bare "YYYY-MM-DD" would cut days at
+ * UTC midnight — hours off for any non-UTC user. Anchoring to local midnight
+ * (converted to UTC) makes "today" mean the user's calendar day.
+ */
+export function localMidnightIso(daysAgo = 0): string {
   const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - daysAgo);
+  return d.toISOString();
 }
 
 export function getTotals(db: Database, sinceDate?: string): TurnTotals {
@@ -77,7 +87,6 @@ export function getTotals(db: Database, sinceDate?: string): TurnTotals {
   const output = row?.out    ?? 0;
   const total  = input + cw5m + cw1h + cr + output;
 
-  // Cost estimate across models (use default model for simplicity in aggregate)
   const byModel = getModelStats(db, sinceDate);
   const totalCost = byModel.reduce((sum, m) => {
     const c = computeCost(m.model, m.input, m.output, m.cacheCreate5m, m.cacheCreate1h, m.cacheRead);
@@ -88,10 +97,10 @@ export function getTotals(db: Database, sinceDate?: string): TurnTotals {
 }
 
 export function getDailySeries(db: Database, days = 30): DailyStat[] {
-  const since = daysBefore(days);
+  const since = localMidnightIso(days);
   return db.query<DailyStat, [string]>(
     `SELECT
-       substr(ts, 1, 10) as date,
+       date(ts, 'localtime') as date,
        SUM(input_tokens)    as input,
        SUM(cache_create_5m) as cacheCreate5m,
        SUM(cache_create_1h) as cacheCreate1h,
@@ -99,7 +108,7 @@ export function getDailySeries(db: Database, days = 30): DailyStat[] {
        SUM(output_tokens)   as output,
        SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
      FROM turns WHERE ts >= ?
-     GROUP BY substr(ts, 1, 10)
+     GROUP BY date(ts, 'localtime')
      ORDER BY date`
   ).all(since);
 }
@@ -121,27 +130,28 @@ export function getModelStats(db: Database, sinceDate?: string): ModelStat[] {
   ).all();
 }
 
-export function getSessions(db: Database, opts: {
+export function getAgents(db: Database, opts: {
   limit?: number; offset?: number; project?: string; search?: string;
-} = {}): { rows: SessionSummary[]; total: number } {
+} = {}): { rows: AgentSummaryRow[]; total: number } {
   const { limit = 50, offset = 0, project, search } = opts;
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
-  if (project) { conditions.push("s.cwd = ?"); params.push(project); }
-  if (search) { conditions.push("(s.title LIKE ? OR s.cwd LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+  if (project) { conditions.push("a.cwd = ?"); params.push(project); }
+  if (search) { conditions.push("(a.title LIKE ? OR a.cwd LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const allParams = [...params, limit, offset];
 
   const countRow = db.query(
-    `SELECT COUNT(*) as n FROM sessions s ${where}`
+    `SELECT COUNT(*) as n FROM agents a ${where}`
   ).get(...params) as { n: number } | null;
 
   const rows = db.query(
     `SELECT
-       s.session_id, s.title, s.cwd, s.project_flat, s.is_subagent, s.parent_session_id,
-       s.started_at, s.last_seen_at, s.turn_count,
+       a.agent_id, a.provider, a.run_id, a.title, a.cwd, a.project_flat,
+       a.is_subagent, a.parent_agent_id, a.agent_type,
+       a.started_at, a.last_seen_at, a.turn_count,
        t.model,
        COALESCE(t.input, 0)  as input,
        COALESCE(t.cw5m, 0)   as cacheCreate5m,
@@ -149,9 +159,9 @@ export function getSessions(db: Database, opts: {
        COALESCE(t.cr, 0)     as cacheRead,
        COALESCE(t.out, 0)    as output,
        COALESCE(t.total, 0)  as total
-     FROM sessions s
+     FROM agents a
      LEFT JOIN (
-       SELECT session_id,
+       SELECT agent_id,
          MAX(model) as model,
          SUM(input_tokens)    as input,
          SUM(cache_create_5m) as cw5m,
@@ -159,35 +169,36 @@ export function getSessions(db: Database, opts: {
          SUM(cache_read)      as cr,
          SUM(output_tokens)   as out,
          SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-       FROM turns GROUP BY session_id
-     ) t ON s.session_id = t.session_id
+       FROM turns GROUP BY agent_id
+     ) t ON a.agent_id = t.agent_id
      ${where}
-     ORDER BY s.last_seen_at DESC NULLS LAST
+     ORDER BY a.last_seen_at DESC NULLS LAST
      LIMIT ? OFFSET ?`
-  ).all(...allParams) as SessionSummary[];
+  ).all(...allParams) as AgentSummaryRow[];
 
   return { rows, total: countRow?.n ?? 0 };
 }
 
 export function getProjects(db: Database): {
-  cwd: string; sessionCount: number; totalTokens: number; lastActive: string | null;
+  cwd: string; runCount: number; agentCount: number; totalTokens: number; lastActive: string | null;
 }[] {
   return db.query<{
-    cwd: string; sessionCount: number; totalTokens: number; lastActive: string | null;
+    cwd: string; runCount: number; agentCount: number; totalTokens: number; lastActive: string | null;
   }, []>(
     `SELECT
-       s.cwd,
-       COUNT(DISTINCT s.session_id) as sessionCount,
+       a.cwd,
+       COUNT(DISTINCT a.run_id) as runCount,
+       COUNT(DISTINCT a.agent_id) as agentCount,
        COALESCE(SUM(t.total), 0) as totalTokens,
-       MAX(s.last_seen_at) as lastActive
-     FROM sessions s
+       MAX(a.last_seen_at) as lastActive
+     FROM agents a
      LEFT JOIN (
-       SELECT session_id,
+       SELECT agent_id,
          SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-       FROM turns GROUP BY session_id
-     ) t ON s.session_id = t.session_id
-     WHERE s.cwd IS NOT NULL
-     GROUP BY s.cwd
+       FROM turns GROUP BY agent_id
+     ) t ON a.agent_id = t.agent_id
+     WHERE a.cwd IS NOT NULL
+     GROUP BY a.cwd
      ORDER BY lastActive DESC NULLS LAST`
   ).all();
 }
@@ -204,65 +215,27 @@ export function getCacheHitRate(db: Database, sinceDate?: string): number {
 }
 
 export function getTopTurns(db: Database, limit = 10): {
-  session_id: string; ts: string; model: string | null; total: number;
+  agent_id: string; ts: string; model: string | null; total: number;
 }[] {
-  return db.query<{ session_id: string; ts: string; model: string | null; total: number }, [number]>(
-    `SELECT session_id, ts, model,
+  return db.query<{ agent_id: string; ts: string; model: string | null; total: number }, [number]>(
+    `SELECT agent_id, ts, model,
        (input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
      FROM turns ORDER BY total DESC LIMIT ?`
   ).all(limit);
 }
 
-export interface TopSessionStat {
-  session_id: string;
-  title: string | null;
-  cwd: string | null;
-  model: string | null;
-  turn_count: number;
-  last_seen_at: string | null;
-  input: number;
-  cacheCreate5m: number;
-  cacheCreate1h: number;
-  cacheRead: number;
-  output: number;
-  total: number;
-}
-
-export function getTopSessions(db: Database, limit = 10): TopSessionStat[] {
-  return db.query<TopSessionStat, [number]>(
-    `SELECT
-       s.session_id, s.title, s.cwd, s.last_seen_at, s.turn_count,
-       t.model, t.input, t.cacheCreate5m, t.cacheCreate1h, t.cacheRead, t.output, t.total
-     FROM sessions s
-     INNER JOIN (
-       SELECT session_id,
-         MAX(model)           as model,
-         SUM(input_tokens)    as input,
-         SUM(cache_create_5m) as cacheCreate5m,
-         SUM(cache_create_1h) as cacheCreate1h,
-         SUM(cache_read)      as cacheRead,
-         SUM(output_tokens)   as output,
-         SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-       FROM turns
-       GROUP BY session_id
-     ) t ON s.session_id = t.session_id
-     ORDER BY t.total DESC
-     LIMIT ?`
-  ).all(limit);
-}
-
-export function getActiveSessions(db: Database, windowMs = 5 * 60_000): number {
-  const since = new Date(Date.now() - windowMs).toISOString();
-  const row = db.query<{ n: number }, [string]>(
-    "SELECT COUNT(DISTINCT session_id) as n FROM turns WHERE ts >= ?"
-  ).get(since);
+export function getAgentCount(db: Database, sinceDate?: string): number {
+  const where = sinceDate ? `WHERE started_at >= '${sinceDate}'` : "";
+  const row = db.query<{ n: number }, []>(
+    `SELECT COUNT(*) as n FROM agents ${where}`
+  ).get();
   return row?.n ?? 0;
 }
 
-export function getSessionCount(db: Database, sinceDate?: string): number {
+export function getRunCount(db: Database, sinceDate?: string): number {
   const where = sinceDate ? `WHERE started_at >= '${sinceDate}'` : "";
   const row = db.query<{ n: number }, []>(
-    `SELECT COUNT(*) as n FROM sessions ${where}`
+    `SELECT COUNT(*) as n FROM runs ${where}`
   ).get();
   return row?.n ?? 0;
 }

@@ -28,9 +28,9 @@
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 5 16 3-8h3"/></svg>
           <span class="nav-label">Audit</span>
         </button>
-        <button class="nav-item" data-tab="sessions">
+        <button class="nav-item" data-tab="runs">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8.5" y1="6" x2="21" y2="6"/><line x1="8.5" y1="12" x2="21" y2="12"/><line x1="8.5" y1="18" x2="21" y2="18"/><circle cx="3.7" cy="6" r="1.6"/><circle cx="3.7" cy="12" r="1.6"/><circle cx="3.7" cy="18" r="1.6"/></svg>
-          <span class="nav-label">Sessions</span>
+          <span class="nav-label">Runs</span>
         </button>
         <button class="nav-item" data-tab="settings">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.5v3.2M12 18.3v3.2M21.5 12h-3.2M5.7 12H2.5M18.7 5.3l-2.3 2.3M7.6 16.4l-2.3 2.3M18.7 18.7l-2.3-2.3M7.6 7.6L5.3 5.3"/></svg>
@@ -100,8 +100,8 @@
             </div>
           </div>
           <div class="chart-card">
-            <div class="chart-card-title">Top 10 sessions by tokens — click a bar to open its detail</div>
-            <div id="chart-top-sessions" style="height:340px"></div>
+            <div class="chart-card-title">Top 10 runs by tokens — click a bar to open its detail</div>
+            <div id="chart-top-runs" style="height:340px"></div>
           </div>
         </section>
 
@@ -115,18 +115,18 @@
           </div>
         </section>
 
-        <!-- Sessions -->
-        <section id="tab-sessions" class="tab-content" hidden>
+        <!-- Runs -->
+        <section id="tab-runs" class="tab-content" hidden>
           <div class="controls-row">
-            <input type="text" id="search-input" class="input-sm" placeholder="Search sessions…">
+            <input type="text" id="search-input" class="input-sm" placeholder="Search runs…">
             <select id="project-filter" class="input-sm"><option value="">All projects</option></select>
-            <span id="sessions-count" class="text-dim"></span>
+            <span id="runs-count" class="text-dim"></span>
             <div style="flex:1"></div>
-            <button id="sessions-prev" class="btn">‹ Prev</button>
-            <span id="sessions-page" class="page-pill">1</span>
-            <button id="sessions-next" class="btn">Next ›</button>
+            <button id="runs-prev" class="btn">‹ Prev</button>
+            <span id="runs-page" class="page-pill">1</span>
+            <button id="runs-next" class="btn">Next ›</button>
           </div>
-          <div id="sessions-table-wrap"></div>
+          <div id="runs-table-wrap"></div>
         </section>
 
         <!-- Settings -->
@@ -150,21 +150,25 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <!-- Session Detail (full page) -->
+  <!-- Run Detail (full page): agent-list sidebar + canvas + detail panel -->
   <div id="sd-page" hidden>
     <div class="sd-topbar">
-      <button id="sd-back-btn" class="btn">← Sessions</button>
+      <button id="sd-back-btn" class="btn">← Runs</button>
       <div class="sd-topbar-title">
-        <div class="sd-title" id="modal-title">Session</div>
+        <div class="sd-title" id="modal-title">Run</div>
         <div class="sd-subtitle" id="modal-subtitle"></div>
       </div>
       <span id="sd-stats" class="text-dim sd-topbar-stats"></span>
       <div class="sd-panel-tabs">
+        <button class="sd-panel-tab" data-panel="agents">Agents</button>
         <button class="sd-panel-tab active" data-panel="map">Map</button>
         <button class="sd-panel-tab" data-panel="detail">Detail</button>
       </div>
     </div>
-    <div class="sd-body" id="sd-body">
+    <div class="sd-body sd-body-3col" id="sd-body">
+      <aside class="sd-agents" id="sd-agents">
+        <div class="sd-placeholder text-dim">Loading…</div>
+      </aside>
       <div class="sd-canvas" id="sd-canvas"></div>
       <div class="sd-detail" id="sd-detail">
         <div class="sd-placeholder text-dim">← Click a node to view details</div>

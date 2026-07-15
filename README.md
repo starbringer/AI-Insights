@@ -51,40 +51,64 @@ bun run build        # compile to dist/llm-usage.exe (Windows x64)
 
 The UI is a **neomorphic / soft-UI** design — tactile minimal cards built from soft dual shadows, a warm amber accent, and a left sidebar for navigation. A **light** (warm cream) and **dark** (slate) theme are both included; toggle them with the **Theme** control at the bottom of the sidebar. The choice is persisted to `localStorage` and charts re-theme in place.
 
+## Concepts: Run / Agent / Turn
+
+The app organizes recorded activity into three nested levels:
+
+- **Run** — one logical execution (one AI session). May contain one or many agents. For a plain chat (no sub-agents) a run holds exactly one agent. For something like an orchestrator that spawns multiple Task sub-agents, the run holds the parent plus all descendants linked through the provider's native parent/child markers.
+- **Agent** — one conversation context. Maps to a single transcript file (one `.jsonl` for Claude Code). An agent has a model, a cwd, a title, and a list of turns.
+- **Turn** — one **API call** (one LLM request/response). Claude Code writes one JSONL line per content block of a response, each repeating the same usage numbers — turns are deduplicated by the response's `message.id`, so token totals count each API call exactly once. Failed calls echoed with model `<synthetic>` are excluded from counts and the model list (they surface in the session tree as error nodes instead).
+
+Sub-agents are detected from the provider's own data — for Claude Code that's the `<parent>/subagents/agent-*.jsonl` directory convention. No heuristics or content sniffing. If a provider's framework doesn't record parent/child links between separate transcript files, each transcript becomes a one-agent run; this is correct behavior, not a limitation.
+
+### Accuracy notes
+
+- **Token dedupe:** without `message.id` dedupe, real transcripts over-count output tokens ~2.4× (each multi-block response is written as several lines). All totals, charts, and cost estimates use the deduped numbers.
+- **Day boundaries:** "Today" / daily buckets use your local calendar day, not UTC.
+- **Titles:** a run is titled by the transcript's `ai-title` record (Claude Code's own AI-generated session title) when present; otherwise by the first real user prompt with IDE/framework wrapper tags stripped.
+- **Cache write TTL:** the 5m/1h split comes from `usage.cache_creation`; legacy records with only a total are attributed to the 5m bucket (the default TTL) so cost is not overstated.
+
 ## What It Shows
 
 ### Dashboard
-- 5 KPI cards: today, 7-day, 30-day totals (each with API-equiv cost), cache hit rate, active sessions
+- 5 KPI cards: today, 7-day, 30-day totals (each with API-equiv cost), cache hit rate, **active runs**
 - Daily 30-day token trend chart (stacked: input / output / cache write / cache read)
 - Token usage by model — stacked horizontal bar
-- Top 10 projects by tokens — horizontal bar
-- Top 10 sessions by tokens — stacked horizontal bar; click a bar to jump to that session's detail page
+- Top projects by tokens — horizontal bar (with run + agent counts)
+- **Top 10 runs by tokens** — stacked horizontal bar; click a bar to open that run's detail page
 
 ### Audit
 Data-driven findings about your Claude Code configuration:
 
 | Finding | Metric |
 |---------|--------|
-| CLAUDE.md size | Word count + estimated tokens injected per session |
-| Hook volume | Hook count × estimated fires × token cost |
-| MCP servers | All servers from `claude mcp list` with scope (user/local/project/claude.ai) + schema tokens per turn + **estimated 30-day injection cost** (schema tokens × sessions in last 30d) |
+| CLAUDE.md size | Global **and per-project** CLAUDE.md files (projects discovered from your transcripts, case-deduped), word/token counts, injected tokens per day = global size × agents active that day |
+| Hook volume | Hook entries from settings.json/.claude.json (with matchers) × **recorded** fires from the transcript event stream: real prompt counts for UserPromptSubmit, real Stop-hook fires, Pre/PostToolUse counted against the entry's matcher regex over actual tool calls |
+| MCP servers | All servers from `claude mcp list` with scope (user/local/project/claude.ai) + schema tokens per turn (live JSON-RPC probe of stdio servers) + estimated 30-day injection cost (schema tokens × agents in last 30d) |
 | Cache efficiency | Hit rate over time (line chart + gauge) |
-| Skills | Installed skills list with **SKILL.md token count** (per-invocation cost) |
+| Skills | Installed skills list with SKILL.md token count (per-invocation cost) |
+| Settings | Default model + effort level, permission allow/deny rule counts, auto-approve warning |
 | Plugins | Installed plugins list |
-| Model mix | Token share per model |
+| Model mix | Token share per model (last 30 days) |
 
 Each finding has a configurable threshold (warn/error) you can adjust in the Settings tab.
 
-### Sessions
-Paginated table of all sessions with token counts, model, project path, and last-seen time. Supports search and project filter.
+### Runs
+Paginated table of all runs with title, project, **agent count** (× N badge when > 1), turn count, token totals, and last-active time. Supports search and project filter.
 
-**Session Detail Flow** — Click **View** on any session to open a full-screen two-panel view (1:1 horizontal split). Press **← Sessions** or Escape to return.
-- **Left panel (Map)**: directed flowchart, one conversation per group of 3 nodes: **User Prompt** → **Activities** → **Response**. Each conversation is wrapped in a labeled "ROUND N" card with a left-edge accent strip, visually grouping its nodes (including any sub-agents that branch to the right). Sub-agents loop back to the round's Final Reply with a dashed edge. All rounds are shown; the main flow column is horizontally centered and scrolls vertically.
-- **Right panel (Detail)**: full detail for the selected node — prompt text, tool calls with inputs/results, or response text.
+**Run Detail — Session Trees** — Click **View** on any run (or open `#run=<run_id>` directly) to open a full-screen three-panel layout. Press **← Runs** or Escape to return.
 
-On mobile (≤ 640 px) the two panels are toggled via **Map / Detail** buttons in the top bar; tapping a node automatically switches to the Detail panel.
+The middle canvas renders the whole session as **one tree per agent, all stacked in the same scrollable view**: the main agent's tree first, then each sub-agent's own tree below it. Within a tree:
 
-Color coding: user prompts (blue), activities/tool calls (green), responses (gray), sub-agent branches (purple).
+- The **spine** (top level) is the chronological flow of the conversation: user prompts → LLM calls → hook fires → compactions → errors, connected by a vertical thread.
+- Each **LLM call** node shows the model, output/cache-read tokens, and expands into its children: interleaved **thinking**, **text output**, and every **tool call** in order — plain tools ⚙, **MCP calls** ⇄, **sub-agent spawns** ◈ (with a `tree ↓` jump link to that sub-agent's tree), and **skill invocations** ❖ with the injected skill content nested beneath.
+- Tool nodes carry their **result inline** (✓/✗ + preview); the full input/result opens in the right panel.
+- **Framework events** are first-class nodes: `⚡` hook fires (command + duration, flags blocked continuations), `✕` API errors and rate-limit retries, `▣` context compactions (pre → post token counts), `⤷` model refusal fallbacks (original → fallback model), `✚` injected context (todo reminders, IDE state, deferred tool loads…).
+- **Branches** in the transcript DAG (prompt edits, retries, rewinds) render as collapsed `⎇ Abandoned branch` sub-trees — the mainline follows the path the session actually continued on.
+
+Panels: **left** — agents in the session (click to scroll to that agent's tree); **right** — full detail for the selected node (complete prompt/output text, tool input & result, usage chips, hook/error metadata). The top bar shows session totals: prompts, LLM calls, tools, MCP, sub-agents, hooks, errors, compactions, branches.
+
+On mobile (≤ 900 px) the detail panel hides and toggles in via a top-bar tab; on ≤ 640 px the agents panel also toggles.
 
 ### Settings
 - Edit warning/error thresholds for all audit metrics
@@ -94,7 +118,7 @@ Color coding: user prompts (blue), activities/tool calls (green), responses (gra
 
 The top bar has a **Source ▾** switcher that lists every registered provider. The active selection is persisted to `localStorage`. On first launch the app picks the first provider that has data; if none do, the app still loads and shows a "No usage data detected" banner with the expected data location.
 
-Providers are declared in [`src/providers/index.ts`](src/providers/index.ts):
+Providers are self-contained adapters under [`src/providers/<id>/`](src/providers/). The shared interface is defined in [`src/providers/types.ts`](src/providers/types.ts):
 
 ```ts
 export interface Provider {
@@ -102,31 +126,45 @@ export interface Provider {
   label: string;
   description: string;
   dataDir: string;
-  hasData(): boolean;  // cheap presence check
+  hasData(): boolean;
+  watchGlobs(): string[];                   // patterns the watcher should mind
+  fileMatches(path: string): boolean;       // does this path belong to this provider?
+  scanAll(db): void;                        // startup full scan
+  ingestFile(db, path): void;               // incremental update for one file + refresh derived roll-ups
+  loadAgentDetail(agentId): NormalizedTurn[];  // detail page rows
 }
 ```
 
-The `GET /api/providers` endpoint exposes them to the UI together with a `hasData` flag (computed at request time).
+The registry in [`src/providers/index.ts`](src/providers/index.ts) lists every provider, and `providerForPath(path)` dispatches changed files to the right one. `GET /api/providers` exposes the list to the UI together with a `hasData` flag (computed at request time).
 
 ### Claude Code (current)
 
-The app reads `~/.claude/projects/**/*.jsonl`. These are Claude Code's local transcript files — they contain token usage data from the `usage` field of each API response message. No API keys are needed; all parsing is local.
+Lives in [`src/providers/claude-code/`](src/providers/claude-code/). The adapter reads `~/.claude/projects/**/*.jsonl` — Claude Code's local transcript files — and emits normalized turns plus a full session tree for the detail page. The Claude Code-specific conventions it recognizes:
+- **Multi-line responses**: one API response spans several `assistant` lines (one per content block) sharing `message.id` — grouped into a single turn
+- **`<synthetic>` error echoes** (`isApiErrorMessage`) — excluded from usage, shown as error nodes in the tree
+- **`system` lines**: `stop_hook_summary` (hook fires), `api_error` (retries), `compact_boundary` (context compaction, re-linked through `logicalParentUuid`), `model_refusal_fallback`, `turn_duration`
+- **`attachment` lines** (todo reminders, deferred tool loads, IDE state, …) — shown as injected-context nodes
+- **`ai-title` lines** — preferred source for run titles
+- **uuid/parentUuid branching** (prompt edits, retries) — mainline resolved as the path with the latest descendant; side paths become branch sub-trees
+- **Sub-agent transcripts** at `<parent-agent-id>/subagents/agent-*.jsonl` (Task-spawned children) and in-file sidechains (`isSidechain`)
+- The `sourceToolUseID` field linking injected content (skill bodies) back to the tool call that produced it
+
+No API keys are needed; all parsing is local.
 
 ### Adding a new provider (Gemini / ChatGPT / Ollama / …)
 
-1. Add an entry to `PROVIDERS` with `hasData()` pointing at the source's data location.
-2. Build a parser under `src/transcripts/` (or a new sibling folder) that emits the same `turns` shape consumed by [`aggregate.ts`](src/transcripts/aggregate.ts).
-3. Wire ingestion in the startup scan / file watcher.
-4. (Optional) When you actually need per-source filtering in queries, thread the active provider id through the API and add a `provider` column to the `turns` table.
+1. Create `src/providers/<id>/index.ts` exporting an object that implements the `Provider` interface from [`src/providers/types.ts`](src/providers/types.ts).
+2. Inside that folder, write a parser that walks `dataDir` and upserts rows via the helpers in [`src/transcripts/cache.ts`](src/transcripts/cache.ts), and a detail loader that returns `NormalizedTurn[]`.
+3. Append your provider object to the `PROVIDERS` array in [`src/providers/index.ts`](src/providers/index.ts).
 
-Aggregation, audit, pricing, and the UI all key off a model name, so a new provider mostly only needs the parser.
+The watcher, aggregations, audit, pricing, and UI are all provider-agnostic — they only operate on rows in the SQLite tables and `NormalizedTurn` objects. Pricing keys off the model name, so as long as your turns include a recognizable model string, costs work out of the box.
 
 Token estimation for prompt injection cost (CLAUDE.md, hooks, MCP schemas) uses `js-tiktoken` with `cl100k_base` encoding, which runs locally in WASM.
 
 ## Project Structure
 
 ```
-server.ts                  Entry point, Hono app, file watcher startup
+server.ts                  Entry point, Hono app, watcher startup, provider scan loop
 src/
   paths.ts                 All path constants
   db.ts                    SQLite setup (bun:sqlite, WAL mode)
@@ -134,12 +172,18 @@ src/
   pricing.ts               Per-model cost table + computeCost()
   thresholds.ts            Configurable warning thresholds
   providers/
-    index.ts               Provider registry + hasData() probes
+    types.ts               Provider interface + NormalizedTurn shape
+    index.ts               Provider registry, providerForPath / providerById lookups
+    claude-code/           Self-contained Claude Code adapter
+      index.ts             Exports the claudeCodeProvider object
+      parser.ts            Incremental JSONL parsing, message.id dedupe, sub-agent meta.json
+      agentDetail.ts       Reads a JSONL and emits NormalizedTurn[] (no length truncation)
+      agentTree.ts         Folds the transcript DAG into render-ready session trees
+      titles.ts            Agent title extraction (wrapper-tag stripping)
   transcripts/
-    parser.ts              Incremental JSONL parsing with byte-offset tracking
-    cache.ts               SQLite read/write helpers
-    titles.ts              Session title extraction
-    aggregate.ts           SQL aggregation queries (totals, series, sessions)
+    cache.ts               Generic SQLite read/write helpers (provider-agnostic)
+    aggregate.ts           SQL aggregation queries (totals, series, agents, models, projects)
+    runs.ts                Derived roll-up: run-id resolution (parent-chain walk), agent activity recompute (turn count + last-seen), refreshRuns; listRuns, loadRun, getTopRuns
   audit/
     claudeMd.ts            CLAUDE.md size audit
     hooks.ts               Settings.json hooks audit
@@ -148,15 +192,15 @@ src/
     skills.ts              Skills directory audit
     settings.ts            Model + permissions audit
     index.ts               Orchestrator with 60s cache
-  watcher.ts               chokidar watcher → incremental DB updates
+  watcher.ts               chokidar watcher → dispatches changes to the owning provider
   api/
     auditEndpoints.ts      GET/POST /api/audit, GET/PUT /api/thresholds, pricing
-    transcriptEndpoints.ts /api/stats, /api/timeseries, /api/models, /api/sessions, /api/projects, /api/top-sessions
+    transcriptEndpoints.ts /api/stats, /api/timeseries, /api/models, /api/projects, /api/runs, /api/run/:id, /api/agents, /api/agent/:id (flat turns), /api/agent/:id/tree (session tree), /api/top-runs, /api/top-turns
     providersEndpoint.ts   GET /api/providers
 static/
   index.html               Sidebar SPA shell (4 tabs + session-detail overlay)
   style.css                Neomorphic soft-UI theme — light + dark, CSS variables
-  app.js                   Vanilla JS: fetch, ECharts, theme toggle, session-detail flowchart
+  app.js                   Vanilla JS: fetch, ECharts, theme toggle, session-tree renderer
   lib/
     echarts.min.js         Apache ECharts 5.5.1 (offline, 1007KB)
 data/                      SQLite DB lives here (git-ignored)
@@ -164,13 +208,15 @@ data/                      SQLite DB lives here (git-ignored)
 
 ## Database
 
-SQLite at `data/cache.db` (WAL mode). Three tables:
+SQLite at `data/cache.db` (WAL mode). Five tables, all carrying a `provider` column for future multi-source support:
 
-- **`files`** — tracks each JSONL file path + byte offset for incremental parsing
-- **`turns`** — one row per API call: session_id, model, token counts, timestamp
-- **`sessions`** — one row per session: title, cwd, subagent flag, first/last seen
+- **`files`** — tracks each transcript file path + byte offset for incremental parsing.
+- **`runs`** — derived roll-up, one row per logical run: title, cwd, agent count, turn count, first/last seen. Rebuilt from `agents`/`turns` after every full scan **and** after every incremental ingest (debounced), so the Runs page stays live without a restart.
+- **`agents`** — one row per agent (one transcript file). Carries `run_id`, `parent_agent_id`, `parent_turn_index` (for ordering siblings), `agent_type`, `description` (from sub-agent `meta.json` when present), title, cwd, last seen, turn count.
+- **`turns`** — one row per API call, **unique on (agent_id, message_id)**: agent_id, run_id, message_id, request_id, model, token counts, timestamp. The unique index is what deduplicates Claude Code's one-line-per-content-block format. Source of truth for token totals, turn counts, and last-seen times — all recomputed from here, never trusted from a maintained counter (incremental parsing of timestamp-less trailing records like `ai-title`/`mode`/`summary` would otherwise zero out turn counts or null out `last_seen_at`).
+- **`events`** — lightweight event stream extracted during parsing, idempotent on (agent_id, source uuid): real user prompts, tool calls (with tool name), hook fires, API errors, compactions, model fallbacks. Powers the audit page's recorded (not estimated) counts.
 
-The DB is rebuilt automatically from JSONL files on each startup. You can delete `data/cache.db` at any time to force a full re-parse.
+The schema is versioned (`PRAGMA user_version`). When the app starts and finds a different version it drops and recreates everything, then re-parses every transcript. You can also delete `data/cache.db` at any time to force a full rebuild.
 
 ## Subscription Usage
 

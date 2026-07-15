@@ -1,46 +1,16 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { PROJECTS_DIR } from "../paths";
+import { claudeCodeProvider } from "./claude-code";
+import type { Provider, ProviderInfo } from "./types";
 
-export interface Provider {
-  id: string;
-  label: string;
-  description: string;
-  dataDir: string;
-  hasData(): boolean;
-}
+export type { Provider, ProviderInfo, NormalizedTurn } from "./types";
 
-function dirContainsJsonl(dir: string, depthBudget = 4): boolean {
-  try {
-    if (!statSync(dir).isDirectory()) return false;
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        if (depthBudget > 0 && dirContainsJsonl(join(dir, entry.name), depthBudget - 1)) return true;
-      } else if (entry.name.endsWith(".jsonl")) {
-        return true;
-      }
-    }
-  } catch { /* ignore */ }
-  return false;
-}
-
+/**
+ * Registry of all known providers. Adding a new source (Gemini, ChatGPT,
+ * Ollama, …) means dropping its module under src/providers/<id>/ and
+ * appending its exported provider object here.
+ */
 export const PROVIDERS: Provider[] = [
-  {
-    id: "claude-code",
-    label: "Claude Code",
-    description: "Local JSONL transcripts under ~/.claude/projects/",
-    dataDir: PROJECTS_DIR,
-    hasData: () => existsSync(PROJECTS_DIR) && dirContainsJsonl(PROJECTS_DIR),
-  },
+  claudeCodeProvider,
 ];
-
-export interface ProviderInfo {
-  id: string;
-  label: string;
-  description: string;
-  dataDir: string;
-  hasData: boolean;
-}
 
 export function listProviders(): ProviderInfo[] {
   return PROVIDERS.map(p => ({
@@ -50,4 +20,17 @@ export function listProviders(): ProviderInfo[] {
     dataDir: p.dataDir,
     hasData: p.hasData(),
   }));
+}
+
+/** Find the provider that owns a given file path (used by the watcher). */
+export function providerForPath(path: string): Provider | null {
+  for (const p of PROVIDERS) {
+    if (path.startsWith(p.dataDir) && p.fileMatches(path)) return p;
+  }
+  return null;
+}
+
+/** Find a provider by id. */
+export function providerById(id: string): Provider | null {
+  return PROVIDERS.find(p => p.id === id) ?? null;
 }

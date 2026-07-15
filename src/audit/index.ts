@@ -5,7 +5,7 @@ import { getSkillsAudit, type SkillsAudit } from "./skills";
 import { getMcpAudit, type McpAudit } from "./mcp";
 import { getPluginsAudit, type PluginsAudit } from "./plugins";
 import { getSettingsAudit, type SettingsAudit } from "./settings";
-import { getModelStats, getCacheHitRate, getDailySeries, getSessionCount } from "../transcripts/aggregate";
+import { getModelStats, getCacheHitRate, getDailySeries, getAgentCount } from "../transcripts/aggregate";
 import { getThresholds, statusForMin, type Status } from "../thresholds";
 
 export interface ModelMixAudit {
@@ -24,7 +24,7 @@ export interface AuditReport {
   settings: SettingsAudit;
   modelMix: ModelMixAudit;
   cacheHitRate30d: number;
-  sessions30d: number;
+  agents30d: number;
   overallStatus: Status;
 }
 
@@ -65,7 +65,7 @@ export async function getAuditReport(db: Database, projectPaths: string[] = [], 
 
   const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
   const cacheHitRate30d = getCacheHitRate(db, ago30);
-  const sessions30d = getSessionCount(db, ago30);
+  const agents30d = getAgentCount(db, ago30);
   const cacheStatus = statusForMin(cacheHitRate30d, t.cacheHitRateMin);
 
   const statuses: Status[] = [claudeMd.status, hooks.status, mcp.status, settings.status, cacheStatus];
@@ -75,7 +75,7 @@ export async function getAuditReport(db: Database, projectPaths: string[] = [], 
   const report: AuditReport = {
     generatedAt: new Date().toISOString(),
     claudeMd, hooks, skills, mcp, plugins, settings, modelMix,
-    cacheHitRate30d, sessions30d, overallStatus,
+    cacheHitRate30d, agents30d, overallStatus,
   };
 
   _cache = { report, ts: Date.now() };

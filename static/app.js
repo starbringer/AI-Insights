@@ -248,7 +248,7 @@ const tabData = {};
 const PAGE_META = {
   dashboard: ['Dashboard', 'Token usage at a glance'],
   audit:     ['Configuration Audit', 'Data-driven findings about your Claude Code setup'],
-  sessions:  ['Sessions', 'Browse and inspect every recorded session'],
+  runs:      ['Runs', 'Browse and inspect every recorded run'],
   settings:  ['Settings', 'Tune audit thresholds and reference pricing'],
 };
 
@@ -268,7 +268,7 @@ function switchTab(tab) {
 function loadTab(tab) {
   if (tab === 'dashboard') loadDashboard();
   else if (tab === 'audit') loadAudit();
-  else if (tab === 'sessions') loadSessions();
+  else if (tab === 'runs') loadRuns();
   else if (tab === 'settings') loadSettings();
 }
 
@@ -277,11 +277,11 @@ function loadTab(tab) {
 async function loadDashboard() {
   const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
   const calls = [
-    ['stats',        '/stats'],
-    ['series',       '/timeseries?days=30'],
-    ['models',       `/models?since=${ago30}`],
-    ['projects',     '/projects'],
-    ['topSessions',  '/top-sessions?limit=10'],
+    ['stats',     '/stats'],
+    ['series',    '/timeseries?days=30'],
+    ['models',    `/models?since=${ago30}`],
+    ['projects',  '/projects'],
+    ['topRuns',   '/top-runs?limit=10'],
   ];
 
   // allSettled so a single missing endpoint (e.g. server not restarted after
@@ -302,11 +302,11 @@ async function loadDashboard() {
   }
   for (const f of failures) console.warn(`Dashboard endpoint failed: ${f.path} —`, f.err.message);
 
-  if (data.stats)       renderKpiCards(data.stats);
-  if (data.series)      renderTrendChart(data.series);
-  if (data.models)      renderModelsChart(data.models);
-  if (data.projects)    renderProjectsChart(data.projects);
-  if (data.topSessions) renderTopSessionsChart(data.topSessions);
+  if (data.stats)     renderKpiCards(data.stats);
+  if (data.series)    renderTrendChart(data.series);
+  if (data.models)    renderModelsChart(data.models);
+  if (data.projects)  renderProjectsChart(data.projects);
+  if (data.topRuns)   renderTopRunsChart(data.topRuns);
 }
 
 const SVG_A = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
@@ -319,14 +319,14 @@ const KPI_ICONS = {
 };
 
 function renderKpiCards(stats) {
-  const { today, sevenDays, thirtyDays, cacheHitRate30d, activeSessions } = stats;
+  const { today, sevenDays, thirtyDays, cacheHitRate30d, activeRuns } = stats;
   const cacheStatus = cacheHitRate30d >= 50 ? 'ok' : 'warn';
   const cards = [
     { icon: 'today',  label: 'Today',     value: fmt.tokens(today.total),       sub: `${fmt.tokens(today.input)} in · ${fmt.tokens(today.output)} out`, sub2: `~$${today.totalCost?.toFixed(2) ?? '?'} API-equiv` },
     { icon: 'week',   label: '7 days',    value: fmt.tokens(sevenDays.total),   sub: `${fmt.tokens(sevenDays.input)} in · ${fmt.tokens(sevenDays.output)} out`, sub2: `~$${sevenDays.totalCost?.toFixed(2) ?? '?'} API-equiv` },
     { icon: 'month',  label: '30 days',   value: fmt.tokens(thirtyDays.total),  sub: `${fmt.tokens(thirtyDays.input)} in · ${fmt.tokens(thirtyDays.output)} out`, sub2: `${fmt.usd(thirtyDays.totalCost)} API-equiv` },
     { icon: 'cache',  label: 'Cache hit', value: fmt.pct(cacheHitRate30d),      sub: '30-day average', cls: cacheStatus },
-    { icon: 'active', label: 'Active',    value: String(activeSessions),        sub: 'sessions · 5 min window' },
+    { icon: 'active', label: 'Active',    value: String(activeRuns ?? 0),       sub: 'runs · 5 min window' },
   ];
   document.getElementById('kpi-row').innerHTML = cards.map(c => `
     <div class="kpi-card ${c.cls ?? ''}">
@@ -402,37 +402,39 @@ function renderProjectsChart(projects) {
     tooltip: {
       formatter: (p) => {
         const proj = top[p.dataIndex];
-        return `${esc(proj.cwd ?? '?')}<br>${fmt.tokens(proj.totalTokens)} tokens · ${proj.sessionCount} sessions`;
+        return `${esc(proj.cwd ?? '?')}<br>${fmt.tokens(proj.totalTokens)} tokens · ${proj.runCount ?? 0} runs · ${proj.agentCount ?? 0} agents`;
       },
     },
   });
 }
 
-function renderTopSessionsChart(sessions) {
-  const chart = initChart('chart-top-sessions');
+function renderTopRunsChart(runs) {
+  const chart = initChart('chart-top-runs');
   if (!chart) return;
-  if (!sessions?.length) {
+  if (!runs?.length) {
     chart.clear();
-    chart.setOption({ ...baseOption(), title: { text: 'No sessions yet', left: 'center', top: 'middle', textStyle: { color: COLOR.dim, fontSize: 13, fontWeight: 'normal' } } });
+    chart.setOption({ ...baseOption(), title: { text: 'No runs yet', left: 'center', top: 'middle', textStyle: { color: COLOR.dim, fontSize: 13, fontWeight: 'normal' } } });
     return;
   }
 
-  // Reverse so the #1 session lands at the top of the horizontal bar chart
-  const rows = [...sessions].reverse();
+  // Reverse so the #1 run lands at the top of the horizontal bar chart
+  const rows = [...runs].reverse();
   const labels = rows.map(s => {
     const t = (s.title ?? '').trim() || '(untitled)';
-    return t.length > 42 ? t.slice(0, 41) + '…' : t;
+    const suffix = (s.agent_count ?? 1) > 1 ? `  · ${s.agent_count} agents` : '';
+    const trimmed = t.length > 42 ? t.slice(0, 41) + '…' : t;
+    return `${trimmed}${suffix}`;
   });
 
   chart.setOption({
     ...baseOption(),
-    grid: { left: 240, right: 100, top: 28, bottom: 8 },
+    grid: { left: 260, right: 100, top: 28, bottom: 8 },
     legend: { data: ['Input', 'Output', 'Cache write', 'Cache read'], top: 0, textStyle: { color: COLOR.dim, fontSize: 11 } },
     xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
     yAxis: {
       type: 'category',
       data: labels,
-      axisLabel: { color: COLOR.dim, fontSize: 11, width: 230, overflow: 'truncate' },
+      axisLabel: { color: COLOR.dim, fontSize: 11, width: 250, overflow: 'truncate' },
       axisTick: { show: false },
     },
     series: [
@@ -450,7 +452,7 @@ function renderTopSessionsChart(sessions) {
         const lines = [
           `<b>${esc(s.title ?? '(untitled)')}</b>`,
           esc(s.cwd ?? '—'),
-          `${s.turn_count ?? 0} turns · ${esc((s.model ?? '').replace('claude-', ''))}`,
+          `${s.agent_count ?? 1} agent${(s.agent_count ?? 1) === 1 ? '' : 's'} · ${s.turn_count ?? 0} turns · ${esc((s.model ?? '').replace('claude-', ''))}`,
           ...ps.map(p => `${p.marker} ${p.seriesName}: ${fmt.tokens(p.value)}`),
           `<b>Total: ${fmt.tokens(s.total)}</b>`,
         ];
@@ -459,12 +461,12 @@ function renderTopSessionsChart(sessions) {
     },
   });
 
-  // Click a bar to jump to that session's detail page
+  // Click a bar to jump to that run's detail page
   chart.off('click');
   chart.on('click', params => {
     if (params.componentType !== 'series') return;
     const s = rows[params.dataIndex];
-    if (s?.session_id) openSessionDetail(s.session_id, s.title ?? '', s.cwd ?? '');
+    if (s?.run_id) openRunDetail(s.run_id, s.title ?? '', s.cwd ?? '');
   });
 }
 
@@ -478,9 +480,10 @@ async function loadAudit() {
     grid.innerHTML = '';
     grid.appendChild(buildClaudeMdCard(report.claudeMd));
     grid.appendChild(buildHooksCard(report.hooks));
-    grid.appendChild(buildMcpCard(report.mcp, report.sessions30d ?? 0));
+    grid.appendChild(buildMcpCard(report.mcp, report.agents30d ?? 0));
     grid.appendChild(buildCacheHitCard(report));
     grid.appendChild(buildSkillsCard(report.skills));
+    grid.appendChild(buildSettingsCard(report.settings));
     grid.appendChild(buildPluginsCard(report.plugins));
     grid.appendChild(buildModelMixCard(report.modelMix, report));
   } catch (e) {
@@ -508,8 +511,12 @@ function auditCard(title, status, headlineHtml, chartId, chartHeight, fixHtml) {
 
 function buildClaudeMdCard(d) {
   if (!d) return emptyCard('CLAUDE.md');
-  const headline = `${fmt.tokens(d.totalTokens)} tokens · ${d.totalWords} words · ${d.sessionCount30d} sessions (30d) · est. ${fmt.tokens(d.estimatedInjectedTokens30d)} injected`;
+  const fileCt = d.files?.length ?? 0;
+  const headline = `${fileCt} file${fileCt !== 1 ? 's' : ''} · ${fmt.tokens(d.totalTokens)} tokens · ${d.totalWords} words · ${d.agentCount30d ?? 0} agents (30d) · est. ${fmt.tokens(d.estimatedInjectedTokens30d)} injected`;
+  const fileRows = (d.files ?? []).map(f =>
+    `<li><code>${esc(f.label)}</code> — ${fmt.tokens(f.tokens)} tokens / ${f.words} words</li>`).join('');
   const fix = `<ul>
+    ${fileRows}
     <li>Move project-specific rules to <code>&lt;project&gt;/.claude/CLAUDE.md</code></li>
     <li>Extract complex patterns into Skills (loaded on demand, not always injected)</li>
     <li>Remove explanatory comments — keep only imperative instructions</li>
@@ -535,7 +542,7 @@ function buildHooksCard(d) {
   if (!d) return emptyCard('Hooks');
   const totalFires7d = d.fires7d?.reduce((s,f) => s + f.fires7d, 0) ?? 0;
   const totalTokens7d = d.fires7d?.reduce((s,f) => s + f.estimatedTokens, 0) ?? 0;
-  const headline = `${d.entries.length} hook entries · ~${fmt.tokens(totalTokens7d)} tokens / 7 days · ${totalFires7d} estimated fires`;
+  const headline = `${d.entries.length} hook entries · ${totalFires7d} recorded fires / 7 days · ~${fmt.tokens(totalTokens7d)} tokens`;
   const fix = `<ul>
     <li>Disable plugin: <code>claude plugin disable &lt;name&gt;</code></li>
     <li>Remove hook from <code>~/.claude/settings.json</code> under <code>hooks.&lt;event&gt;</code></li>
@@ -545,14 +552,17 @@ function buildHooksCard(d) {
   setTimeout(() => {
     const chart = initChart('chart-hooks');
     if (!chart || !d.fires7d?.length) return;
-    const data = d.fires7d.map(f => ({ name: f.event, value: f.estimatedTokens }));
+    const data = d.fires7d.map(f => ({ name: f.event, value: f.fires7d }));
     chart.setOption({ ...baseOption(),
       grid: { left:6, right:58, top:8, bottom:8, containLabel:true },
       xAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
-      yAxis: { type:'category', data:data.map(d=>d.name), axisLabel:{color:COLOR.dim} },
+      yAxis: { type:'category', data:data.map(d=>d.name), axisLabel:{color:COLOR.dim, fontSize:10} },
       series: [{ type:'bar', data:data.map(d=>d.value), itemStyle:{color:COLOR.purple},
         label:{show:true, position:'right', formatter:p=>fmt.tokens(p.value), color:COLOR.dim} }],
-      tooltip: { formatter: p => `${p.name}: ${fmt.tokens(p.value)} est. tokens/7d` },
+      tooltip: { formatter: p => {
+        const f = d.fires7d[p.dataIndex];
+        return `${esc(p.name)}: ${f?.fires7d ?? 0} fires · ~${fmt.tokens(f?.estimatedTokens ?? 0)} est. tokens/7d`;
+      } },
     });
   }, 50);
   return card;
@@ -597,7 +607,7 @@ function buildMcpCard(d, sessions30d = 0) {
         </tr>`;
       }).join('')}</tbody>
     </table>
-    ${showEst ? `<p style="color:var(--dim);font-size:10px;margin-top:6px">Est. 30d = schema tokens × ${sessions30d} sessions (upper bound; user/local MCPs inject into every session)</p>` : ''}`;
+    ${showEst ? `<p style="color:var(--dim);font-size:10px;margin-top:6px">Est. 30d = schema tokens × ${sessions30d} agents in the last 30 days (upper bound; user/local MCPs inject into every session)</p>` : ''}`;
   } else if (chartEl) {
     chartEl.style.height = 'auto';
     chartEl.innerHTML = '<p style="color:var(--dim);font-size:12px;margin-top:8px">No MCP servers configured.</p>';
@@ -706,7 +716,8 @@ function buildModelMixCard(d, report) {
     const chart = initChart('chart-modelmix');
     if (!chart) return;
     try {
-      const models = await api('/models');
+      const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+      const models = await api(`/models?since=${ago30}`);
       if (!models.length) return;
       const palette = [COLOR.blue, COLOR.orange, COLOR.purple, COLOR.green, COLOR.yellow];
       // Horizontal bars: model names sit on the y-axis so they're never rotated
@@ -731,6 +742,32 @@ function buildModelMixCard(d, report) {
   return card;
 }
 
+function buildSettingsCard(d) {
+  if (!d) return emptyCard('Settings');
+  const headline = d.model
+    ? `Default model: <code>${esc(d.model)}</code>${d.effortLevel ? ` · effort: ${esc(d.effortLevel)}` : ''}`
+    : 'No default model set (per-session choice)';
+  const fix = `<ul>
+    <li>Change default model: <code>/model</code> or edit <code>~/.claude/settings.json</code></li>
+    <li>Prune stale entries from <code>permissions.allow</code> — each is matched on every tool call</li>
+    <li>Never enable auto-approve globally; scope permissions per project instead</li>
+  </ul>`;
+  const card = auditCard('Settings', d.status, headline, 'chart-settings', 0, fix);
+  const el = card.querySelector('#chart-settings');
+  if (el) {
+    el.style.height = 'auto';
+    el.innerHTML = `<table style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse">
+      <tbody>
+        <tr><td style="padding:4px 8px 4px 0;color:var(--dim)">Allow rules</td><td class="td-num">${d.permissionsAllow ?? 0}</td></tr>
+        <tr><td style="padding:4px 8px 4px 0;color:var(--dim)">Deny rules</td><td class="td-num">${d.permissionsDeny ?? 0}</td></tr>
+        <tr><td style="padding:4px 8px 4px 0;color:var(--dim)">Auto-approve all</td>
+            <td class="td-num">${d.hasAutoApprove ? '<span class="status-warn">⚠ enabled</span>' : 'off'}</td></tr>
+      </tbody>
+    </table>`;
+  }
+  return card;
+}
+
 function emptyCard(title) {
   const d = document.createElement('div');
   d.className = 'audit-card';
@@ -739,24 +776,24 @@ function emptyCard(title) {
   return d;
 }
 
-// ===== Sessions =====
+// ===== Runs =====
 
-let sessionsState = { page: 0, limit: 50, search: '', project: '', sort: 'last_seen_at' };
+let runsState = { page: 0, limit: 50, search: '', project: '', sort: 'last_seen_at' };
 
-async function loadSessions(reset = true) {
-  if (reset) sessionsState.page = 0;
-  const { page, limit, search, project } = sessionsState;
+async function loadRuns(reset = true) {
+  if (reset) runsState.page = 0;
+  const { page, limit, search, project } = runsState;
   const offset = page * limit;
   const params = new URLSearchParams({ limit, offset, ...(search ? {search} : {}), ...(project ? {project} : {}) });
   try {
     const [data, projects] = await Promise.all([
-      api(`/sessions?${params}`),
+      api(`/runs?${params}`),
       api('/projects'),
     ]);
-    renderSessionsTable(data.rows, data.total);
+    renderRunsTable(data.rows, data.total);
     renderProjectFilter(projects);
   } catch (e) {
-    document.getElementById('sessions-table-wrap').innerHTML = `<p class="text-error">${esc(e.message)}</p>`;
+    document.getElementById('runs-table-wrap').innerHTML = `<p class="text-error">${esc(e.message)}</p>`;
   }
 }
 
@@ -767,36 +804,40 @@ function renderProjectFilter(projects) {
     projects.map(p => `<option value="${esc(p.cwd)}" ${p.cwd===cur?'selected':''}>${esc(p.cwd ?? '(unknown)')}</option>`).join('');
 }
 
-function renderSessionsTable(rows, total) {
-  document.getElementById('sessions-count').textContent = `${total} session${total!==1?'s':''}`;
-  const { page, limit } = sessionsState;
+function renderRunsTable(rows, total) {
+  document.getElementById('runs-count').textContent = `${total} run${total!==1?'s':''}`;
+  const { page, limit } = runsState;
   const totalPages = Math.ceil(total / limit);
-  document.getElementById('sessions-page').textContent = `${page+1} / ${Math.max(1,totalPages)}`;
-  document.getElementById('sessions-prev').disabled = page === 0;
-  document.getElementById('sessions-next').disabled = page >= totalPages - 1;
+  document.getElementById('runs-page').textContent = `${page+1} / ${Math.max(1,totalPages)}`;
+  document.getElementById('runs-prev').disabled = page === 0;
+  document.getElementById('runs-next').disabled = page >= totalPages - 1;
 
   if (!rows.length) {
-    document.getElementById('sessions-table-wrap').innerHTML = '<p class="text-dim" style="padding:24px 0">No sessions found.</p>';
+    document.getElementById('runs-table-wrap').innerHTML = '<p class="text-dim" style="padding:24px 0">No runs found.</p>';
     return;
   }
 
   const table = document.createElement('table');
   table.innerHTML = `
     <thead><tr>
-      <th></th><th>Title</th><th>Project</th><th>Model</th>
-      <th class="td-num">Turns</th><th class="td-num">Total tokens</th>
+      <th></th><th>Title</th><th>Project</th>
+      <th class="td-num">Agents</th><th class="td-num">Turns</th>
+      <th class="td-num">Total tokens</th>
       <th class="td-num">Input</th><th class="td-num">Cache read</th>
       <th class="td-num">Output</th><th>Last active</th>
     </tr></thead>
     <tbody>${rows.map(r => {
       const title = r.title ?? 'Untitled';
       const cwd   = r.cwd ?? '';
+      const agentBadge = (r.agent_count ?? 1) > 1
+        ? `<span class="run-agents-badge">× ${r.agent_count}</span>`
+        : '';
       return `<tr>
-      <td style="padding:0 6px 0 0"><button class="btn-sm btn-view" data-sid="${esc(r.session_id)}" data-title="${esc(title)}" data-cwd="${esc(cwd)}">View</button></td>
-      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(title)}">${esc(title)}</td>
+      <td style="padding:0 6px 0 0"><button class="btn-sm btn-view" data-rid="${esc(r.run_id)}" data-title="${esc(title)}" data-cwd="${esc(cwd)}">View</button></td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(title)}">${agentBadge}${esc(title)}</td>
       <td class="td-dim" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(cwd)}">${esc(cwd.split(/[/\\]/).pop() || '—')}</td>
-      <td class="td-dim">${esc((r.model??'').replace('claude-','').replace(/-(\d)/g,' $1'))}</td>
-      <td class="td-num">${r.turn_count}</td>
+      <td class="td-num">${r.agent_count ?? 1}</td>
+      <td class="td-num">${r.turn_count ?? 0}</td>
       <td class="td-num">${fmt.tokens(r.total)}</td>
       <td class="td-num td-dim">${fmt.tokens(r.input)}</td>
       <td class="td-num td-dim">${fmt.tokens(r.cacheRead)}</td>
@@ -807,10 +848,10 @@ function renderSessionsTable(rows, total) {
   `;
   table.querySelectorAll('.btn-view').forEach(btn => {
     btn.addEventListener('click', () => {
-      openSessionDetail(btn.dataset.sid, btn.dataset.title, btn.dataset.cwd);
+      openRunDetail(btn.dataset.rid, btn.dataset.title, btn.dataset.cwd);
     });
   });
-  document.getElementById('sessions-table-wrap').replaceChildren(table);
+  document.getElementById('runs-table-wrap').replaceChildren(table);
 }
 
 // ===== Settings =====
@@ -934,454 +975,358 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('search-input').addEventListener('input', e => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
-      sessionsState.search = e.target.value;
-      loadSessions();
+      runsState.search = e.target.value;
+      loadRuns();
     }, 300);
   });
 
   document.getElementById('project-filter').addEventListener('change', e => {
-    sessionsState.project = e.target.value;
-    loadSessions();
+    runsState.project = e.target.value;
+    loadRuns();
   });
 
-  document.getElementById('sessions-prev').addEventListener('click', () => {
-    if (sessionsState.page > 0) { sessionsState.page--; loadSessions(false); }
+  document.getElementById('runs-prev').addEventListener('click', () => {
+    if (runsState.page > 0) { runsState.page--; loadRuns(false); }
   });
-  document.getElementById('sessions-next').addEventListener('click', () => {
-    sessionsState.page++;
-    loadSessions(false);
+  document.getElementById('runs-next').addEventListener('click', () => {
+    runsState.page++;
+    loadRuns(false);
   });
 
   await loadProviders();
 
-  const validTabs = ['dashboard', 'audit', 'sessions', 'settings'];
+  const validTabs = ['dashboard', 'audit', 'runs', 'settings'];
+  const runLink = location.hash.match(/^#run=(.+)$/);
   const hashTab = location.hash.replace('#', '');
-  const initialTab = validTabs.includes(hashTab) ? hashTab : 'dashboard';
+  const initialTab = validTabs.includes(hashTab) ? hashTab : runLink ? 'runs' : 'dashboard';
   switchTab(initialTab);
+  // Deep link: #run=<run_id> opens that run's session-tree page directly.
+  if (runLink) openRunDetail(decodeURIComponent(runLink[1]), '', '');
 });
 
-// ===== Session Detail — Flowchart =====
+// ===== Session Detail — Session Trees =====
+//
+// One SESSION (run) = one or more AGENTS. Every agent gets its own tree:
+// the main agent's tree first, then each sub-agent's tree below it. Inside a
+// tree the top level is the chronological spine (prompt → API call → hook →
+// …) and children carry what each step did: tool calls with results, MCP
+// calls, injected context, thinking, errors. Abandoned uuid branches (edits,
+// retries) render as collapsed ⎇ sub-trees.
 
-function toolCategory(name) {
-  if (name === 'Agent') return 'agent';
-  if (name.startsWith('mcp__')) return 'mcp';
-  return 'tool';
-}
+const NODE_ICON = {
+  prompt: '●', assistant: '✦', text: '¶', thinking: '∿',
+  context: '✚', hook: '⚡', api_error: '✕', compact: '▣',
+  fallback: '⤷', info: '·', branch: '⎇',
+};
+const CAT_ICON = { tool: '⚙', mcp: '⇄', task: '◈', skill: '❖' };
+const KIND_TITLES = {
+  prompt: 'User prompt', assistant: 'LLM call', text: 'Assistant text',
+  thinking: 'Thinking', tool: 'Tool call', context: 'Injected context',
+  hook: 'Hook', api_error: 'API error', compact: 'Context compaction',
+  fallback: 'Model fallback', info: 'Info', branch: 'Abandoned branch',
+};
 
-// Theme-aware palette for the session-detail flowchart (plain SVG).
-function flowColors() {
-  const dark = document.documentElement.dataset.theme === 'dark';
-  if (dark) {
-    return {
-      shLight: '#3a3d47', shDark: '#191b20',
-      edge: '#565963', branch: '#b89ee0',
-      groupFill: 'rgba(240,185,74,0.06)', groupStroke: 'rgba(255,255,255,0.07)',
-      groupText: '#c7c2b6', accentA: '#6fa0db', accentB: '#b89ee0',
-      nodes: {
-        user:       { bg: '#2f323b', border: '#6fa0db', text: '#a4c4e8' },
-        activities: { bg: '#2f323b', border: '#6ec39c', text: '#8fcfac' },
-        response:   { bg: '#2f323b', border: '#8c8980', text: '#b6b2a7' },
-        agent:      { bg: '#2f323b', border: '#b89ee0', text: '#c9b3ea' },
-        summary:    { bg: '#2f323b', border: '#565963', text: '#8c8980' },
-      },
-    };
-  }
-  return {
-    shLight: '#ffffff', shDark: '#c8c3b6',
-    edge: '#bcb6a7', branch: '#a98cd6',
-    groupFill: 'rgba(220,162,42,0.06)', groupStroke: 'rgba(74,68,58,0.10)',
-    groupText: '#8a8478', accentA: '#5f93d1', accentB: '#a98cd6',
-    nodes: {
-      user:       { bg: '#ece9e1', border: '#5f93d1', text: '#3f6b9e' },
-      activities: { bg: '#ece9e1', border: '#5fb98f', text: '#3f8c68' },
-      response:   { bg: '#ece9e1', border: '#9a9488', text: '#6f6a60' },
-      agent:      { bg: '#ece9e1', border: '#a98cd6', text: '#7a5fb0' },
-      summary:    { bg: '#ece9e1', border: '#bcb6a7', text: '#8a8478' },
-    },
-  };
-}
+let openRunArgs = null;
+let currentRunData = null;         // {run, agents}
+let treeNodeIndex = new Map();     // nid -> {node, agentId}
+let selectedNodeRow = null;
 
-// Build a directed flowchart from session turns.
-// Each conversation round = 3 nodes: User Prompt → Activities → Response.
-// Sub-agents branch right from the Activities node. Caps at MAX_ROUNDS rounds.
-function buildFlowGraph(turns, _title) {
-  const NODE_W = 220, NODE_H = 56;
-  const INNER_GAP = 28;   // gap between nodes within a conversation
-  const ROUND_GAP = 60;   // gap between conversation cards (group padding adds the rest)
-  const BRANCH_X = NODE_W + 70;  // x offset for sub-agent column
-  const AGENT_V_GAP = NODE_H + 22;  // vertical spacing between stacked sub-agent nodes
-
-  // === Step 1: group turns into conversation rounds ===
-  // A round = one human turn + all following assistant activity until the next human.
-  // Assistant turns WITH tool calls → activities (tools, MCP, agents).
-  // Assistant turns with ONLY text and NO tool calls → final reply.
-  const rounds = [];
-  let cur = null;
-
-  for (const turn of turns) {
-    if (turn.kind === 'human') {
-      if (cur) rounds.push(cur);
-      cur = { userMsg: turn.text || '', toolCalls: [], agents: [], replyTexts: [] };
-    } else if (turn.kind === 'assistant') {
-      if (!cur) cur = { userMsg: '', toolCalls: [], agents: [], replyTexts: [] };
-      if ((turn.toolCalls?.length ?? 0) > 0) {
-        // This is an activity turn — collect tool calls and agent spawns
-        for (const tc of turn.toolCalls) {
-          const result = (turn.toolResults || []).find(r => r.toolUseId === tc.id) || null;
-          if (toolCategory(tc.name) === 'agent') {
-            let label = 'Sub-Agent';
-            try {
-              const inp = JSON.parse(tc.inputSummary.length < 300 ? tc.inputSummary : '{}');
-              label = inp.description || inp.prompt?.slice(0, 50) || 'Sub-Agent';
-            } catch { /* ignore */ }
-            cur.agents.push({ tc, result, label });
-          } else {
-            cur.toolCalls.push({ tc, result });
-          }
-        }
-      } else if (turn.text?.trim()) {
-        // No tool calls + has text → this is the final reply
-        cur.replyTexts.push(turn.text.trim());
-      }
-    }
-  }
-  if (cur) rounds.push(cur);
-
-  // === Step 2: layout nodes ===
-  const nodes = [];
-  const edges = [];
-  const groups = [];
-  let mainY = 0;
-  let prevId = null;
-  let visibleIdx = 0;
-
-  for (let i = 0; i < rounds.length; i++) {
-    const round = rounds[i];
-    const hasTools = round.toolCalls.length > 0;
-    const hasAgents = round.agents.length > 0;
-    const replyText = round.replyTexts.join(' ').trim();
-
-    // Skip rounds that are just CLI commands (e.g. /model, /clear) with no AI activity or reply
-    if (!hasTools && !hasAgents && !replyText) continue;
-
-    // Pre-compute the Final Reply id so sub-agent return edges can reference it before it's created
-    const respId = replyText ? `${i}_r` : null;
-    const roundStartY = mainY;
-
-    // --- User Prompt node ---
-    const promptId = `${i}_p`;
-    const promptText = round.userMsg.trim().replace(/\n+/g, ' ');
-    // No hard truncation here — the renderer uses foreignObject + CSS ellipsis,
-    // so the node always fits and hover shows the full text via <title>.
-    const promptLabel = (promptText || 'Tool Round').slice(0, 240);
-    nodes.push({ id: promptId, name: promptLabel, kind: 'user', x: 0, y: mainY,
-      actData: { ...round, _nodeKind: 'user' } });
-    if (prevId) edges.push({ source: prevId, target: promptId, branch: false });
-    mainY += NODE_H + INNER_GAP;
-
-    // --- Activities node + Sub-Agent nodes (both parallel children of User Prompt) ---
-    let lastMainId = promptId;
-    const parallelY = mainY;
-
-    if (hasTools) {
-      const actId = `${i}_a`;
-      const mcpCt = round.toolCalls.filter(c => c.tc.name.startsWith('mcp__')).length;
-      const plainToolCt = round.toolCalls.length - mcpCt;
-      const parts = [];
-      if (plainToolCt > 0) parts.push(`${plainToolCt} tool${plainToolCt !== 1 ? 's' : ''}`);
-      if (mcpCt > 0) parts.push(`${mcpCt} MCP`);
-      nodes.push({ id: actId, name: parts.join(' · ') || 'Activities', kind: 'activities',
-        x: 0, y: parallelY, actData: { ...round, _nodeKind: 'activities' } });
-      edges.push({ source: promptId, target: actId, branch: false });
-      lastMainId = actId;
-    }
-
-    // Sub-agents: parallel to Activities, both children of User Prompt.
-    // Each also links back to the Final Reply (return branch).
-    for (let j = 0; j < round.agents.length; j++) {
-      const ag = round.agents[j];
-      const aid = `${i}_ag${j}`;
-      const agLabel = ag.label.slice(0, 200);
-      nodes.push({ id: aid, name: agLabel, kind: 'agent', x: BRANCH_X,
-        y: parallelY + j * AGENT_V_GAP, actData: ag });
-      edges.push({ source: promptId, target: aid, branch: true });
-      if (respId) edges.push({ source: aid, target: respId, returnBranch: true });
-    }
-
-    // Advance mainY past the taller of Activities or the sub-agent stack
-    if (hasTools || hasAgents) {
-      const agentStackH = hasAgents ? (round.agents.length - 1) * AGENT_V_GAP + NODE_H : 0;
-      mainY = parallelY + Math.max(hasTools ? NODE_H : 0, agentStackH) + INNER_GAP;
-    }
-
-    // --- Final Reply node ---
-    if (respId) {
-      const respText = replyText.replace(/\n+/g, ' ');
-      const respLabel = respText.slice(0, 240);
-      nodes.push({ id: respId, name: respLabel, kind: 'response', x: 0, y: mainY,
-        actData: { ...round, _nodeKind: 'response' } });
-      edges.push({ source: lastMainId, target: respId, branch: false });
-      mainY += NODE_H + INNER_GAP;
-      prevId = respId;
-    } else {
-      prevId = lastMainId;
-    }
-
-    // Record group bounds (yStart..yEnd covers the inside of the card, padding added at render)
-    groups.push({
-      label: `ROUND ${visibleIdx + 1}`,
-      yStart: roundStartY,
-      yEnd: mainY - INNER_GAP,
-      hasBranch: hasAgents,
-    });
-    visibleIdx++;
-
-    mainY += ROUND_GAP;
-  }
-
-  return { nodes, edges, groups, activities: rounds };
-}
-
-// Render flowchart as plain SVG with fixed-pixel nodes (no auto-scaling).
-// Main flow column is horizontally centered in the container. Container scrolls if tall.
-function renderFlowSVG(container, flowNodes, flowEdges, onNodeClick, flowGroups = []) {
-  const NW = 220, NH = 56, PAD = 32;
-  const BRANCH_X = NW + 70;  // must match buildFlowGraph
-  const GROUP_PAD_X = 24, GROUP_PAD_TOP = 48, GROUP_PAD_BOTTOM = 26;
-  const hasGroups = flowGroups.length > 0;
-  const FC = flowColors();
-
-  // Center the main column within the container (leave room for group padding on the left)
-  const containerW = Math.max(container.clientWidth || 0, 300);
-  const hasAgents = flowNodes.some(n => n.x > 0);
-  const contentW = hasAgents ? BRANCH_X + NW : NW;
-  const minLeft = PAD + (hasGroups ? GROUP_PAD_X : 0);
-  const cx = Math.max(minLeft, Math.floor((containerW - contentW) / 2));
-
-  function nodeX(node) { return node.x === 0 ? cx : cx + BRANCH_X; }
-
-  const ys = flowNodes.map(n => n.y);
-  const oy = hasGroups ? GROUP_PAD_TOP + 4 : PAD;
-  const bottomPad = hasGroups ? GROUP_PAD_BOTTOM + 12 : PAD;
-  const svgW = Math.max(containerW, cx + contentW + Math.max(PAD, GROUP_PAD_X) + 4);
-  const svgH = Math.max(...ys) + NH + oy + bottomPad;
-
-  const p = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" style="display:block">`,
-    `<defs>
-      <marker id="fah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${FC.edge}"/></marker>
-      <marker id="fahb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${FC.branch}"/></marker>
-      <linearGradient id="grpAccent" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${FC.accentA}" stop-opacity="0.9"/>
-        <stop offset="100%" stop-color="${FC.accentB}" stop-opacity="0.8"/>
-      </linearGradient>
-      <filter id="neo" x="-45%" y="-45%" width="190%" height="190%">
-        <feDropShadow dx="3" dy="3" stdDeviation="3.4" flood-color="${FC.shDark}" flood-opacity="0.95"/>
-        <feDropShadow dx="-3" dy="-3" stdDeviation="3.4" flood-color="${FC.shLight}" flood-opacity="0.95"/>
-      </filter>
-    </defs>`,
-  ];
-
-  // Draw conversation group cards first (behind nodes/edges)
-  for (let gi = 0; gi < flowGroups.length; gi++) {
-    const g = flowGroups[gi];
-    const gx = cx - GROUP_PAD_X;
-    const gy = g.yStart + oy - GROUP_PAD_TOP;
-    const gw = (g.hasBranch ? BRANCH_X + NW : NW) + GROUP_PAD_X * 2;
-    const gh = (g.yEnd - g.yStart) + GROUP_PAD_TOP + GROUP_PAD_BOTTOM;
-    // Card
-    p.push(`<rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" rx="18" fill="${FC.groupFill}" stroke="${FC.groupStroke}" stroke-width="1"/>`);
-    // Left accent strip
-    p.push(`<rect x="${gx + 1}" y="${gy + 18}" width="3" height="${Math.max(0, gh - 36)}" rx="1.5" fill="url(#grpAccent)"/>`);
-    // Round number chip (positioned above the first node, with breathing room)
-    const chipW = 86, chipH = 20, chipX = gx + 16, chipY = gy + 12;
-    p.push(`<rect x="${chipX}" y="${chipY}" width="${chipW}" height="${chipH}" rx="10" fill="${FC.groupFill}" stroke="${FC.groupStroke}" stroke-width="0.8"/>`);
-    p.push(`<text x="${chipX + chipW/2}" y="${chipY + 14}" text-anchor="middle" fill="${FC.groupText}" font-size="10" font-weight="700" font-family="system-ui,sans-serif" letter-spacing="1.2">${esc(g.label)}</text>`);
-  }
-
-  for (const e of flowEdges) {
-    const s = flowNodes.find(n => n.id === e.source);
-    const t = flowNodes.find(n => n.id === e.target);
-    if (!s || !t) continue;
-    const sx = nodeX(s), tx = nodeX(t);
-    if (e.branch) {
-      // Forward branch: left column → right column (horizontal bezier)
-      const x1 = sx + NW, y1 = s.y + oy + NH / 2;
-      const x2 = tx, y2 = t.y + oy + NH / 2;
-      const mx = (x1 + x2) / 2;
-      p.push(`<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" stroke="${FC.branch}" stroke-width="1.6" fill="none" marker-end="url(#fahb)"/>`);
-    } else if (e.returnBranch) {
-      // Return branch: right column → left column (sub-agent → final reply, dashed)
-      const x1 = sx + NW / 2, y1 = s.y + oy + NH;
-      const x2 = tx + NW / 2, y2 = t.y + oy;
-      const midy = (y1 + y2) / 2;
-      p.push(`<path d="M${x1},${y1} C${x1},${midy} ${x2},${midy} ${x2},${y2}" stroke="${FC.branch}" stroke-width="1.6" fill="none" stroke-dasharray="5,3" marker-end="url(#fahb)"/>`);
-    } else {
-      const lineX = sx + NW / 2;
-      p.push(`<line x1="${lineX}" y1="${s.y + oy + NH}" x2="${lineX}" y2="${t.y + oy - 5}" stroke="${FC.edge}" stroke-width="1.6" marker-end="url(#fah)"/>`);
-    }
-  }
-
-  for (const node of flowNodes) {
-    const c = FC.nodes[node.kind] || FC.nodes.summary;
-    const nx = nodeX(node), ny = node.y + oy;
-    const bold = node.kind === 'user' ? '600' : '500';
-    const label = esc((node.name || '').replace(/\s+/g, ' ').trim());
-    p.push(`<g class="fnode" data-nid="${esc(String(node.id))}" style="cursor:${node.actData ? 'pointer' : 'default'}">`);
-    p.push(`<title>${label}</title>`);
-    p.push(`<rect x="${nx}" y="${ny}" width="${NW}" height="${NH}" rx="13" fill="${c.bg}" stroke="${c.border}" stroke-width="2" filter="url(#neo)"/>`);
-    p.push(`<foreignObject x="${nx}" y="${ny}" width="${NW}" height="${NH}" pointer-events="none">`);
-    p.push(`<div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:6px 14px;box-sizing:border-box;overflow:hidden"><span style="font:${bold} 12px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;color:${c.text};text-align:center;max-width:100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;word-break:break-word">${label}</span></div>`);
-    p.push(`</foreignObject>`);
-    p.push('</g>');
-  }
-
-  p.push('</svg>');
-  container.innerHTML = p.join('');
-
-  container.querySelectorAll('.fnode').forEach(el => {
-    const nid = el.dataset.nid;
-    const node = flowNodes.find(n => String(n.id) === nid);
-    if (!node?.actData) return;
-    el.addEventListener('click', () => onNodeClick(node));
-  });
-}
-
-// Remembers the open session so a theme switch can re-render the flowchart.
-let openSessionArgs = null;
 function refreshSessionDetail() {
-  if (openSessionArgs) openSessionDetail(...openSessionArgs);
+  if (openRunArgs) openRunDetail(...openRunArgs);
 }
 
-async function openSessionDetail(sessionId, title, cwd) {
-  openSessionArgs = [sessionId, title, cwd];
-  const sdPage = document.getElementById('sd-page');
-  const sdBody = document.getElementById('sd-body');
+function nodeIcon(n) {
+  return n.kind === 'tool' ? (CAT_ICON[n.cat] ?? '⚙') : (NODE_ICON[n.kind] ?? '·');
+}
+
+function fmtClock(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+  catch { return ''; }
+}
+
+async function openRunDetail(runId, title, cwd) {
+  openRunArgs = [runId, title, cwd];
+  const sdPage  = document.getElementById('sd-page');
+  const sdBody  = document.getElementById('sd-body');
+  const agentsEl = document.getElementById('sd-agents');
   const canvasEl = document.getElementById('sd-canvas');
   const detailEl = document.getElementById('sd-detail');
 
-  document.getElementById('modal-title').textContent = title || 'Session';
-  document.getElementById('modal-subtitle').textContent = cwd ? `${cwd}  ·  ${sessionId}` : sessionId;
+  document.getElementById('modal-title').textContent = title || 'Run';
+  document.getElementById('modal-subtitle').textContent = cwd ? `${cwd}  ·  ${runId}` : runId;
   document.getElementById('sd-stats').textContent = '';
+  agentsEl.innerHTML = '<div class="sd-placeholder text-dim">Loading…</div>';
   canvasEl.innerHTML = '<div class="sd-placeholder text-dim">Loading…</div>';
-  detailEl.innerHTML = '<div class="sd-placeholder text-dim">Loading…</div>';
+  detailEl.innerHTML = '<div class="sd-placeholder text-dim">← Click a node to view details</div>';
 
-  sdBody.classList.remove('show-detail');
+  sdBody.classList.remove('show-detail', 'show-agents');
   document.querySelectorAll('.sd-panel-tab').forEach(b => b.classList.toggle('active', b.dataset.panel === 'map'));
 
   sdPage.hidden = false;
   document.body.style.overflow = 'hidden';
 
   try {
-    const turns = await api(`/session/${sessionId}`);
-
-    // Build flowchart and compute stats
-    const { nodes: flowNodes, edges: flowEdges, groups: flowGroups, activities } = buildFlowGraph(turns, title || 'Session');
-    let totalTools = 0, totalMcp = 0, totalAgents = 0, totalPrompts = 0;
-    for (const round of activities) {
-      if (round.userMsg?.trim()) totalPrompts++;
-      for (const { tc } of (round.toolCalls || [])) {
-        if (tc.name.startsWith('mcp__')) totalMcp++;
-        else totalTools++;
-      }
-      totalAgents += (round.agents || []).length;
-    }
-    document.getElementById('sd-stats').textContent =
-      `${totalPrompts} input${totalPrompts !== 1 ? 's' : ''} · ${totalTools} tool call${totalTools !== 1 ? 's' : ''} · ${totalMcp} MCP · ${totalAgents} agent${totalAgents !== 1 ? 's' : ''}`;
-
-    if (turns.length === 0) {
-      canvasEl.innerHTML = '<div class="sd-placeholder text-dim">No turn data found.</div>';
-      detailEl.innerHTML = '';
-      return;
+    const runData = await api(`/run/${runId}`);
+    currentRunData = runData;
+    const agents = runData.agents || [];
+    if (!title && runData.run?.title) {
+      document.getElementById('modal-title').textContent = runData.run.title;
+      document.getElementById('modal-subtitle').textContent = runData.run.cwd ? `${runData.run.cwd}  ·  ${runId}` : runId;
     }
 
-    renderFlowSVG(canvasEl, flowNodes, flowEdges, showFlowNodeDetail, flowGroups);
-    detailEl.innerHTML = '<div class="sd-placeholder text-dim">← Click a node to view details</div>';
+    // Fetch every agent's tree in parallel — all trees belong to this session.
+    const treeResults = await Promise.allSettled(
+      agents.map(a => api(`/agent/${a.agent_id}/tree`))
+    );
+    const trees = new Map();
+    treeResults.forEach((r, i) => {
+      if (r.status === 'fulfilled') trees.set(agents[i].agent_id, r.value);
+    });
 
+    renderAgentSidebar(runData);
+    renderSessionTrees(runData, trees);
+    renderSessionStats(trees);
   } catch (e) {
+    agentsEl.innerHTML = '';
     canvasEl.innerHTML = '';
     detailEl.innerHTML = `<p class="text-error">${esc(e.message)}</p>`;
   }
 }
 
-function showFlowNodeDetail(nodeData) {
-  const el = document.getElementById('sd-detail');
-  el.innerHTML = '';
+function renderSessionStats(trees) {
+  const sum = { prompts: 0, apiCalls: 0, tools: 0, mcp: 0, tasks: 0, hooks: 0, errors: 0, compactions: 0, branches: 0 };
+  for (const t of trees.values()) {
+    for (const k of Object.keys(sum)) sum[k] += t.stats?.[k] ?? 0;
+  }
+  const parts = [
+    `${sum.prompts} prompt${sum.prompts !== 1 ? 's' : ''}`,
+    `${sum.apiCalls} LLM call${sum.apiCalls !== 1 ? 's' : ''}`,
+    `${sum.tools} tool${sum.tools !== 1 ? 's' : ''}`,
+  ];
+  if (sum.mcp) parts.push(`${sum.mcp} MCP`);
+  if (sum.tasks) parts.push(`${sum.tasks} sub-agent${sum.tasks !== 1 ? 's' : ''}`);
+  if (sum.hooks) parts.push(`${sum.hooks} hook${sum.hooks !== 1 ? 's' : ''}`);
+  if (sum.errors) parts.push(`${sum.errors} error${sum.errors !== 1 ? 's' : ''}`);
+  if (sum.compactions) parts.push(`${sum.compactions} compaction${sum.compactions !== 1 ? 's' : ''}`);
+  if (sum.branches) parts.push(`${sum.branches} branch${sum.branches !== 1 ? 'es' : ''}`);
+  document.getElementById('sd-stats').textContent = parts.join(' · ');
+}
 
-  const { kind, actData } = nodeData;
-
-  if (!actData) {
-    el.innerHTML = '<div class="sd-placeholder text-dim">Select a node to view details</div>';
+function renderAgentSidebar(runData) {
+  const el = document.getElementById('sd-agents');
+  const agents = runData.agents || [];
+  if (agents.length === 0) {
+    el.innerHTML = '<div class="sd-placeholder text-dim">No agents</div>';
     return;
   }
 
-  const hdr = document.createElement('div');
-  hdr.className = 'sd-turn-header';
-  el.appendChild(hdr);
+  const header = `<div class="sd-agents-title">Agents · ${agents.length}</div>`;
+  const items = agents.map(a => {
+    const isChild = a.is_subagent === 1;
+    const title = a.title?.trim() || a.description?.trim() || '(untitled)';
+    const pill = a.agent_type ? `<span class="sd-agent-type-pill">${esc(a.agent_type)}</span>` : '';
+    const tokens = fmt.tokens(a.total ?? 0);
+    return `<div class="sd-agent-item ${isChild ? 'child' : ''}" data-aid="${esc(a.agent_id)}">
+      <div class="sd-agent-title">${pill}${esc(title)}</div>
+      <div class="sd-agent-meta">${a.turn_count ?? 0} turns · ${tokens} tokens</div>
+    </div>`;
+  }).join('');
+  el.innerHTML = header + items;
 
-  const tl = document.createElement('div');
-  tl.className = 'tl';
+  el.querySelectorAll('.sd-agent-item').forEach(item => {
+    item.addEventListener('click', () => focusAgentTree(item.dataset.aid));
+  });
+}
 
-  if (kind === 'user') {
-    hdr.textContent = 'User Prompt';
-    tl.appendChild(tlEntry('human', '○', `
-      <div class="tl-card human">
-        <div class="tl-text">${esc(actData.userMsg)}</div>
-      </div>`));
+function focusAgentTree(agentId) {
+  document.querySelectorAll('.sd-agent-item').forEach(it => {
+    it.classList.toggle('active', it.dataset.aid === agentId);
+  });
+  const target = document.getElementById(`tree-agent-${agentId}`);
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.add('flash');
+    setTimeout(() => target.classList.remove('flash'), 1200);
+  }
+  // Mobile: make sure the map panel is visible
+  if (window.innerWidth <= 640) {
+    const body = document.getElementById('sd-body');
+    body.classList.remove('show-detail', 'show-agents');
+    document.querySelectorAll('.sd-panel-tab').forEach(b => b.classList.toggle('active', b.dataset.panel === 'map'));
+  }
+}
 
-  } else if (kind === 'activities') {
-    const toolCt = actData.toolCalls?.length || 0;
-    const mcpCt = actData.toolCalls?.filter(c => c.tc.name.startsWith('mcp__')).length || 0;
-    const parts = [];
-    if (toolCt - mcpCt > 0) parts.push(`${toolCt - mcpCt} tool${toolCt - mcpCt !== 1 ? 's' : ''}`);
-    if (mcpCt > 0) parts.push(`${mcpCt} MCP`);
-    hdr.textContent = `Activities  ·  ${parts.join(', ') || '0 tools'}`;
+// --- tree rendering ---
 
-    for (const { tc, result } of (actData.toolCalls || [])) {
-      const displayName = tc.name.startsWith('mcp__') ? tc.name.replace(/^mcp__[^_]+__/, '') : tc.name;
-      const isMcp = tc.name.startsWith('mcp__');
-      const iconCls = isMcp ? 'mcp' : 'tool';
-      tl.appendChild(tlEntry(iconCls, '⚙', `
-        <div class="tl-card ${iconCls}">
-          <div class="tl-tool-name ${iconCls}">${esc(isMcp ? 'MCP' : 'Tool')}: ${esc(displayName)}</div>
-          <div class="tl-text dim">${esc(tc.inputSummary)}</div>
-        </div>`));
-      if (result) {
-        const cls = result.isError ? 'result-err' : 'result-ok';
-        tl.appendChild(tlEntry(cls, result.isError ? '✗' : '✓', `
-          <div class="tl-card ${cls}">
-            <div class="tl-label ${cls}">${result.isError ? 'Error' : 'Result'}</div>
-            <div class="tl-text dim">${esc(result.content)}</div>
-          </div>`));
-      }
-    }
+let _nidCounter = 0;
 
-  } else if (kind === 'response') {
-    hdr.textContent = 'Final Reply';
-    const responseText = actData.replyTexts?.join('\n') || '';
-    tl.appendChild(tlEntry('human', '◇', `
-      <div class="tl-card" style="border-color:#7a7a9a;border-left:3px solid #7a7a9a">
-        <div class="tl-text">${esc(responseText)}</div>
-      </div>`));
+function renderSessionTrees(runData, trees) {
+  const canvasEl = document.getElementById('sd-canvas');
+  const agents = runData.agents || [];
+  treeNodeIndex = new Map();
+  selectedNodeRow = null;
+  _nidCounter = 0;
 
-  } else if (kind === 'agent') {
-    hdr.textContent = 'Sub-Agent';
-    tl.appendChild(tlEntry('mcp', '◈', `
-      <div class="tl-card mcp">
-        <div class="tl-tool-name mcp">Sub-Agent: ${esc(actData.label || 'Sub-Agent')}</div>
-        <div class="tl-text dim">${esc(actData.tc?.inputSummary || '')}</div>
-      </div>`));
-    if (actData.result) {
-      const cls = actData.result.isError ? 'result-err' : 'result-ok';
-      tl.appendChild(tlEntry(cls, actData.result.isError ? '✗' : '✓', `
-        <div class="tl-card ${cls}">
-          <div class="tl-label ${cls}">${actData.result.isError ? 'Error' : 'Result'}</div>
-          <div class="tl-text dim">${esc(actData.result.content)}</div>
-        </div>`));
-    }
+  if (agents.length === 0) {
+    canvasEl.innerHTML = '<div class="sd-placeholder text-dim">No agents in this run.</div>';
+    return;
   }
 
-  el.appendChild(tl);
+  // Sub-agents claimable by Task nodes (matched by description, then order)
+  const subagents = agents.filter(a => a.is_subagent === 1);
+  const claimed = new Set();
+  function claimSubagent(taskDesc) {
+    if (taskDesc) {
+      const m = subagents.find(a => !claimed.has(a.agent_id) && (a.description === taskDesc || a.title === taskDesc));
+      if (m) { claimed.add(m.agent_id); return m.agent_id; }
+    }
+    const next = subagents.find(a => !claimed.has(a.agent_id));
+    if (next && taskDesc !== undefined) { claimed.add(next.agent_id); return next.agent_id; }
+    return null;
+  }
+
+  const html = [];
+  for (const a of agents) {
+    const tree = trees.get(a.agent_id);
+    const title = a.title?.trim() || a.description?.trim() || '(untitled)';
+    const pill = a.agent_type ? `<span class="sd-agent-type-pill">${esc(a.agent_type)}</span>` : '';
+    const kindTag = a.is_subagent === 1 ? 'Sub-agent tree' : 'Agent tree';
+    html.push(`<section class="tree-agent ${a.is_subagent === 1 ? 'sub' : ''}" id="tree-agent-${esc(a.agent_id)}">`);
+    html.push(`<header class="tree-agent-head">
+      <span class="tree-agent-kind">${kindTag}</span>
+      <span class="tree-agent-title">${pill}${esc(title)}</span>
+      <span class="tree-agent-meta">${a.turn_count ?? 0} LLM calls · ${fmt.tokens(a.total ?? 0)} tokens</span>
+    </header>`);
+
+    if (!tree || !tree.trees?.length) {
+      html.push('<div class="tree-empty text-dim">No transcript data for this agent.</div>');
+    } else {
+      for (const root of tree.trees) {
+        html.push(`<div class="tree-root">`);
+        if (tree.trees.length > 1) html.push(`<div class="tree-root-label">${esc(root.label)}</div>`);
+        html.push(`<div class="tree-spine">`);
+        for (const n of root.spine) html.push(renderNodeHtml(n, a.agent_id, claimSubagent, 0));
+        html.push(`</div></div>`);
+      }
+    }
+    html.push('</section>');
+  }
+
+  canvasEl.innerHTML = html.join('');
+
+  // Click handling — one delegated listener for rows, toggles, jump links
+  canvasEl.onclick = (ev) => {
+    const jump = ev.target.closest('.tnode-jump');
+    if (jump) {
+      ev.stopPropagation();
+      focusAgentTree(jump.dataset.target);
+      return;
+    }
+    const toggle = ev.target.closest('.tnode-toggle');
+    if (toggle) {
+      ev.stopPropagation();
+      toggle.closest('.tnode').classList.toggle('collapsed');
+      return;
+    }
+    const row = ev.target.closest('.tnode-row');
+    if (row) {
+      const rec = treeNodeIndex.get(row.dataset.nid);
+      if (rec) {
+        if (selectedNodeRow) selectedNodeRow.classList.remove('selected');
+        selectedNodeRow = row;
+        row.classList.add('selected');
+        renderNodeDetail(rec.node, rec.agentId);
+      }
+    }
+  };
+}
+
+function renderNodeHtml(n, agentId, claimSubagent, depth) {
+  const nid = `n${_nidCounter++}`;
+  treeNodeIndex.set(nid, { node: n, agentId });
+
+  let children = n.children || [];
+  // An assistant step whose only child is its own text block is redundant —
+  // the label already shows the text and the detail panel has the full copy.
+  if (n.kind === 'assistant' && children.length === 1 && children[0].kind === 'text') children = [];
+
+  const collapsed = n.kind === 'branch' || depth >= 3;
+  const hasKids = children.length > 0;
+  const statusCls = n.status ? ` st-${n.status}` : '';
+  const catCls = n.cat ? ` cat-${n.cat}` : '';
+
+  // Task tool node → link to the sub-agent's own tree
+  let jumpBtn = '';
+  if (n.cat === 'task') {
+    const target = claimSubagent(n.taskDesc ?? null);
+    if (target) jumpBtn = `<button class="tnode-jump" data-target="${esc(target)}" title="Open this sub-agent's tree">tree ↓</button>`;
+  }
+
+  const parts = [];
+  parts.push(`<div class="tnode k-${esc(n.kind)}${catCls}${collapsed && hasKids ? ' collapsed' : ''}">`);
+  parts.push(`<div class="tnode-row${statusCls}" data-nid="${nid}">`);
+  parts.push(`<span class="tnode-icon i-${esc(n.cat ?? n.kind)}">${nodeIcon(n)}</span>`);
+  parts.push(`<span class="tnode-main">`);
+  parts.push(`<span class="tnode-label">${esc(n.label ?? '')}</span>`);
+  if (n.sub) parts.push(`<span class="tnode-sub">${esc(n.sub)}</span>`);
+  parts.push(`</span>`);
+  if (jumpBtn) parts.push(jumpBtn);
+  if (n.ts) parts.push(`<span class="tnode-ts">${fmtClock(n.ts)}</span>`);
+  if (hasKids) parts.push(`<button class="tnode-toggle" title="Collapse / expand">${'▾'}</button>`);
+  parts.push(`</div>`);
+
+  if (hasKids) {
+    parts.push(`<div class="tnode-kids">`);
+    for (const c of children) parts.push(renderNodeHtml(c, agentId, claimSubagent, depth + 1));
+    parts.push(`</div>`);
+  }
+  parts.push(`</div>`);
+  return parts.join('');
+}
+
+// --- detail panel ---
+
+function renderNodeDetail(n, agentId) {
+  const el = document.getElementById('sd-detail');
+  el.innerHTML = '';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'sd-turn-header';
+  const title = n.kind === 'tool'
+    ? `${KIND_TITLES.tool}${n.cat && n.cat !== 'tool' ? ` · ${n.cat.toUpperCase()}` : ''}`
+    : (KIND_TITLES[n.kind] ?? n.kind);
+  hdr.textContent = title;
+  el.appendChild(hdr);
+
+  const meta = document.createElement('div');
+  meta.className = 'nd-meta';
+  const chips = [];
+  if (n.ts) chips.push({ text: fmtClock(n.ts) });
+  if (n.model) chips.push({ text: n.model.replace(/^claude-/, '') });
+  if (n.status === 'err') chips.push({ text: 'error', cls: 'err' });
+  if (n.usage) {
+    chips.push({ text: `in ${fmt.tokens(n.usage.input)}` });
+    chips.push({ text: `out ${fmt.tokens(n.usage.output)}` });
+    if (n.usage.cacheRead) chips.push({ text: `cache read ${fmt.tokens(n.usage.cacheRead)}` });
+    if (n.usage.cacheCreate) chips.push({ text: `cache write ${fmt.tokens(n.usage.cacheCreate)}` });
+  }
+  meta.innerHTML = chips.map(c => `<span class="nd-chip${c.cls ? ` ${c.cls}` : ''}">${esc(c.text)}</span>`).join('');
+  if (chips.length) el.appendChild(meta);
+
+  const sections = n.sections?.length
+    ? n.sections
+    : [{ heading: undefined, text: n.label ?? '' }];
+
+  for (const s of sections) {
+    const box = document.createElement('div');
+    box.className = `nd-section${s.error ? ' err' : ''}`;
+    const h = s.heading ? `<div class="nd-section-head">${esc(s.heading)}</div>` : '';
+    const cls = s.code ? 'nd-pre code' : 'nd-pre';
+    box.innerHTML = `${h}<pre class="${cls}">${esc(s.text)}</pre>`;
+    el.appendChild(box);
+  }
+
   el.scrollTop = 0;
 
   if (window.innerWidth <= 640) {
@@ -1390,41 +1335,21 @@ function showFlowNodeDetail(nodeData) {
   }
 }
 
-function tlEntry(iconClass, iconGlyph, bodyHtml) {
-  const div = document.createElement('div');
-  div.className = 'tl-entry';
-  div.innerHTML = `<div class="tl-icon ${iconClass}">${iconGlyph}</div><div class="tl-body">${bodyHtml}</div>`;
-  return div;
-}
-
-function buildHumanEntry(turn) {
-  const ts = turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString() : '';
-  return tlEntry('human', '○', `
-    <div class="tl-ts">${esc(ts)}</div>
-    <div class="tl-card human">
-      <div class="tl-label human">Human</div>
-      <div class="tl-text">${esc(turn.text)}</div>
-    </div>`);
-}
-
-
-function closeSessionDetail() {
+function closeRunDetail() {
   document.getElementById('sd-page').hidden = true;
   document.body.style.overflow = '';
 }
-document.getElementById('sd-back-btn').addEventListener('click', closeSessionDetail);
+document.getElementById('sd-back-btn').addEventListener('click', closeRunDetail);
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !document.getElementById('sd-page').hidden) closeSessionDetail();
+  if (e.key === 'Escape' && !document.getElementById('sd-page').hidden) closeRunDetail();
 });
 document.querySelectorAll('.sd-panel-tab').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.sd-panel-tab').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     const body = document.getElementById('sd-body');
-    if (btn.dataset.panel === 'detail') {
-      body.classList.add('show-detail');
-    } else {
-      body.classList.remove('show-detail');
-    }
+    body.classList.remove('show-detail', 'show-agents');
+    if (btn.dataset.panel === 'detail')      body.classList.add('show-detail');
+    else if (btn.dataset.panel === 'agents') body.classList.add('show-agents');
   });
 });

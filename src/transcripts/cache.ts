@@ -2,18 +2,23 @@ import type { Database } from "bun:sqlite";
 
 export interface FileRecord {
   path: string;
+  provider: string;
   mtime: number;
   size: number;
   parsed_offset: number;
-  session_id: string | null;
+  agent_id: string | null;
   is_subagent: number;
-  parent_session_id: string | null;
+  parent_agent_id: string | null;
 }
 
 export interface TurnRecord {
-  session_id: string;
+  provider: string;
+  agent_id: string;
+  run_id: string;
   is_subagent: number;
-  parent_session_id: string | null;
+  parent_agent_id: string | null;
+  message_id: string | null;
+  request_id: string | null;
   ts: string;
   model: string | null;
   input_tokens: number;
@@ -25,10 +30,15 @@ export interface TurnRecord {
   raw_offset: number | null;
 }
 
-export interface SessionRecord {
-  session_id: string;
+export interface AgentRecord {
+  agent_id: string;
+  provider: string;
+  run_id: string;
   is_subagent: number;
-  parent_session_id: string | null;
+  parent_agent_id: string | null;
+  parent_turn_index: number | null;
+  agent_type: string | null;
+  description: string | null;
   cwd: string | null;
   project_flat: string | null;
   title: string | null;
@@ -36,6 +46,18 @@ export interface SessionRecord {
   last_seen_at: string | null;
   turn_count: number;
   file_path: string | null;
+}
+
+export interface RunRecord {
+  run_id: string;
+  provider: string;
+  project_flat: string | null;
+  cwd: string | null;
+  title: string | null;
+  started_at: string | null;
+  last_seen_at: string | null;
+  agent_count: number;
+  turn_count: number;
 }
 
 export function getFileRecord(db: Database, path: string): FileRecord | null {
@@ -46,46 +68,109 @@ export function getFileRecord(db: Database, path: string): FileRecord | null {
 
 export function upsertFile(db: Database, r: FileRecord): void {
   db.run(
-    `INSERT INTO files(path,mtime,size,parsed_offset,session_id,is_subagent,parent_session_id)
-     VALUES(?,?,?,?,?,?,?)
+    `INSERT INTO files(path,provider,mtime,size,parsed_offset,agent_id,is_subagent,parent_agent_id)
+     VALUES(?,?,?,?,?,?,?,?)
      ON CONFLICT(path) DO UPDATE SET
+       provider=excluded.provider,
        mtime=excluded.mtime, size=excluded.size,
        parsed_offset=excluded.parsed_offset,
-       session_id=COALESCE(excluded.session_id, session_id),
+       agent_id=COALESCE(excluded.agent_id, agent_id),
        is_subagent=excluded.is_subagent,
-       parent_session_id=excluded.parent_session_id`,
-    [r.path, r.mtime, r.size, r.parsed_offset, r.session_id, r.is_subagent, r.parent_session_id]
+       parent_agent_id=excluded.parent_agent_id`,
+    [r.path, r.provider, r.mtime, r.size, r.parsed_offset, r.agent_id, r.is_subagent, r.parent_agent_id]
   );
 }
 
+/**
+ * Insert one API-call row. A provider may emit the same (agent_id, message_id)
+ * more than once — Claude Code repeats the full usage block on every content-
+ * block line of a response — so conflicts update in place (usage values are
+ * identical across those lines; last write wins keeps this robust either way).
+ */
 export function insertTurn(db: Database, t: TurnRecord): void {
   db.run(
     `INSERT INTO turns
-       (session_id,is_subagent,parent_session_id,ts,model,
+       (provider,agent_id,run_id,is_subagent,parent_agent_id,message_id,request_id,ts,model,
         input_tokens,cache_create_5m,cache_create_1h,cache_read,
         output_tokens,service_tier,raw_offset)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [t.session_id, t.is_subagent, t.parent_session_id, t.ts, t.model,
-     t.input_tokens, t.cache_create_5m, t.cache_create_1h, t.cache_read,
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(agent_id, message_id) DO UPDATE SET
+       ts=excluded.ts,
+       model=excluded.model,
+       input_tokens=excluded.input_tokens,
+       cache_create_5m=excluded.cache_create_5m,
+       cache_create_1h=excluded.cache_create_1h,
+       cache_read=excluded.cache_read,
+       output_tokens=excluded.output_tokens,
+       service_tier=excluded.service_tier`,
+    [t.provider, t.agent_id, t.run_id, t.is_subagent, t.parent_agent_id, t.message_id, t.request_id,
+     t.ts, t.model, t.input_tokens, t.cache_create_5m, t.cache_create_1h, t.cache_read,
      t.output_tokens, t.service_tier, t.raw_offset]
   );
 }
 
-export function upsertSession(db: Database, s: SessionRecord): void {
+export interface EventRecord {
+  provider: string;
+  agent_id: string;
+  run_id: string;
+  ts: string;
+  kind: "prompt" | "tool" | "hook" | "api_error" | "compact" | "fallback";
+  detail: string | null;
+  dedupe: string;
+}
+
+/** Idempotent on (agent_id, dedupe) so incremental re-parses never double count. */
+export function insertEvent(db: Database, e: EventRecord): void {
   db.run(
-    `INSERT INTO sessions
-       (session_id,is_subagent,parent_session_id,cwd,project_flat,
+    `INSERT INTO events(provider,agent_id,run_id,ts,kind,detail,dedupe)
+     VALUES(?,?,?,?,?,?,?)
+     ON CONFLICT(agent_id, dedupe) DO NOTHING`,
+    [e.provider, e.agent_id, e.run_id, e.ts, e.kind, e.detail, e.dedupe]
+  );
+}
+
+export function upsertAgent(db: Database, a: AgentRecord): void {
+  db.run(
+    `INSERT INTO agents
+       (agent_id,provider,run_id,is_subagent,parent_agent_id,parent_turn_index,
+        agent_type,description,cwd,project_flat,
         title,started_at,last_seen_at,turn_count,file_path)
-     VALUES(?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(session_id) DO UPDATE SET
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(agent_id) DO UPDATE SET
+       provider=excluded.provider,
+       run_id=excluded.run_id,
+       is_subagent=excluded.is_subagent,
+       parent_agent_id=COALESCE(excluded.parent_agent_id, parent_agent_id),
+       parent_turn_index=COALESCE(excluded.parent_turn_index, parent_turn_index),
+       agent_type=COALESCE(excluded.agent_type, agent_type),
+       description=COALESCE(excluded.description, description),
        cwd=COALESCE(excluded.cwd, cwd),
        project_flat=COALESCE(excluded.project_flat, project_flat),
-       title=COALESCE(title, excluded.title),
+       title=COALESCE(excluded.title, title),
        started_at=COALESCE(started_at, excluded.started_at),
-       last_seen_at=excluded.last_seen_at,
+       last_seen_at=COALESCE(excluded.last_seen_at, last_seen_at),
        turn_count=excluded.turn_count,
        file_path=COALESCE(file_path, excluded.file_path)`,
-    [s.session_id, s.is_subagent, s.parent_session_id, s.cwd, s.project_flat,
-     s.title, s.started_at, s.last_seen_at, s.turn_count, s.file_path]
+    [a.agent_id, a.provider, a.run_id, a.is_subagent, a.parent_agent_id, a.parent_turn_index,
+     a.agent_type, a.description, a.cwd, a.project_flat,
+     a.title, a.started_at, a.last_seen_at, a.turn_count, a.file_path]
+  );
+}
+
+export function upsertRun(db: Database, r: RunRecord): void {
+  db.run(
+    `INSERT INTO runs
+       (run_id,provider,project_flat,cwd,title,started_at,last_seen_at,agent_count,turn_count)
+     VALUES(?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(run_id) DO UPDATE SET
+       provider=excluded.provider,
+       project_flat=COALESCE(excluded.project_flat, project_flat),
+       cwd=COALESCE(excluded.cwd, cwd),
+       title=COALESCE(excluded.title, title),
+       started_at=COALESCE(started_at, excluded.started_at),
+       last_seen_at=excluded.last_seen_at,
+       agent_count=excluded.agent_count,
+       turn_count=excluded.turn_count`,
+    [r.run_id, r.provider, r.project_flat, r.cwd, r.title, r.started_at, r.last_seen_at, r.agent_count, r.turn_count]
   );
 }

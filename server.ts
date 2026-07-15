@@ -3,7 +3,7 @@ import { serveStatic } from "hono/bun";
 import { mkdirSync } from "node:fs";
 import { DATA_DIR } from "./src/paths";
 import { getDb } from "./src/db";
-import { scanAll } from "./src/transcripts/parser";
+import { PROVIDERS } from "./src/providers";
 import { startWatcher } from "./src/watcher";
 import { auditRouter } from "./src/api/auditEndpoints";
 import { transcriptRouter } from "./src/api/transcriptEndpoints";
@@ -17,8 +17,12 @@ const STATIC_ONLY = argv.includes("--static-only");
 mkdirSync(DATA_DIR, { recursive: true });
 
 const db = getDb();
-console.log("[startup] scanning JSONL files…");
-scanAll(db);
+console.log("[startup] scanning transcript files…");
+for (const provider of PROVIDERS) {
+  if (!provider.hasData()) continue;
+  console.log(`[startup] scanning provider: ${provider.id}`);
+  provider.scanAll(db);
+}
 console.log("[startup] done scanning");
 
 if (!STATIC_ONLY) startWatcher(db);

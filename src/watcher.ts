@@ -1,52 +1,45 @@
 import chokidar from "chokidar";
 import type { Database } from "bun:sqlite";
-import { parseFileIncremental } from "./transcripts/parser";
-import { PROJECTS_DIR } from "./paths";
+import { PROVIDERS, providerForPath } from "./providers";
 
 let debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function startWatcher(db: Database): void {
-  const watcher = chokidar.watch(PROJECTS_DIR, {
-    ignoreInitial: true,
-    persistent: true,
-    depth: 10,
-    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
-  });
+  for (const provider of PROVIDERS) {
+    const watcher = chokidar.watch(provider.dataDir, {
+      ignoreInitial: true,
+      persistent: true,
+      depth: 10,
+      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+    });
 
-  watcher.on("change", (path: string) => {
-    if (!path.endsWith(".jsonl")) return;
+    watcher.on("change", (path: string) => {
+      if (!provider.fileMatches(path)) return;
 
-    const existing = debounceTimers.get(path);
-    if (existing) clearTimeout(existing);
+      const existing = debounceTimers.get(path);
+      if (existing) clearTimeout(existing);
 
-    debounceTimers.set(path, setTimeout(() => {
-      debounceTimers.delete(path);
+      debounceTimers.set(path, setTimeout(() => {
+        debounceTimers.delete(path);
+        handleChange(db, path);
+      }, 200));
+    });
+
+    watcher.on("add", (path: string) => {
+      if (!provider.fileMatches(path)) return;
       handleChange(db, path);
-    }, 200));
-  });
+    });
 
-  watcher.on("add", (path: string) => {
-    if (!path.endsWith(".jsonl")) return;
-    handleChange(db, path);
-  });
+    watcher.on("error", (err: unknown) => {
+      console.error(`[watcher:${provider.id}] error:`, err);
+    });
 
-  watcher.on("error", (err: unknown) => {
-    console.error("[watcher] error:", err);
-  });
-
-  console.log(`[watcher] watching ${PROJECTS_DIR}`);
+    console.log(`[watcher] watching ${provider.dataDir} (${provider.id})`);
+  }
 }
 
 function handleChange(db: Database, filePath: string): void {
-  const normalized = filePath.replace(/\//g, "\\");
-  const isSubagent = normalized.includes("\\subagents\\");
-  let parentSessionId: string | null = null;
-
-  if (isSubagent) {
-    const parts = normalized.split("\\");
-    const idx = parts.lastIndexOf("subagents");
-    if (idx > 0) parentSessionId = parts[idx - 1] ?? null;
-  }
-
-  parseFileIncremental(db, normalized, isSubagent, parentSessionId);
+  const provider = providerForPath(filePath);
+  if (!provider) return;
+  provider.ingestFile(db, filePath);
 }

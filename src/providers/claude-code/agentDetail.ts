@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "path";
-import { readdirSync } from "node:fs";
-import { PROJECTS_DIR } from "../paths";
+import { PROJECTS_DIR } from "../../paths";
 
 export interface ToolCall {
   id: string;
@@ -27,6 +26,7 @@ export interface HumanTurn {
   uuid: string;
   timestamp: string;
   text: string;
+  attachments?: string[];
 }
 
 export interface AssistantTurn {
@@ -42,7 +42,7 @@ export interface AssistantTurn {
 
 export type DetailTurn = HumanTurn | AssistantTurn;
 
-function findSessionFile(sessionId: string): string | null {
+export function findAgentFile(agentId: string): string | null {
   function search(dir: string, depth = 0): string | null {
     if (depth > 4) return null;
     try {
@@ -50,52 +50,79 @@ function findSessionFile(sessionId: string): string | null {
         if (e.isDirectory()) {
           const f = search(join(dir, e.name), depth + 1);
           if (f) return f;
-        } else if (e.name === `${sessionId}.jsonl`) {
+        } else if (e.name === `${agentId}.jsonl` || e.name === `agent-${agentId}.jsonl`) {
           return join(dir, e.name);
         }
       }
-    } catch { }
+    } catch { /* ignore unreadable */ }
     return null;
   }
   return search(PROJECTS_DIR);
 }
 
 function contentText(content: unknown): string {
-  if (typeof content === "string") return content.slice(0, 800);
+  if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
       .filter((b: unknown) => (b as Record<string, unknown>)["type"] === "text")
       .map((b: unknown) => String((b as Record<string, unknown>)["text"] ?? ""))
-      .join("\n")
-      .slice(0, 800);
+      .join("\n");
   }
   return "";
 }
 
-export function loadSessionDetail(sessionId: string): DetailTurn[] {
-  const path = findSessionFile(sessionId);
+/**
+ * Load normalized turns for a single Claude Code agent.
+ *
+ * Claude Code transcripts contain several line types beyond plain user/assistant:
+ *   - queue-operation: pre-prompt enqueue (carries the raw composed prompt)
+ *   - last-prompt:     final composed prompt (system + user + attachments)
+ *   - attachment:      file attachment sent with the next user turn
+ *   - ai-title:        AI-generated session title
+ * Most of these are framework bookkeeping. We surface attachments by name on
+ * their owning user turn; the rest are dropped from the UI flow but remain
+ * in the raw JSONL.
+ *
+ * Text is returned in full — no truncation. The UI is responsible for any
+ * length-based clipping or "show more" affordances.
+ */
+export function loadAgentDetail(agentId: string): DetailTurn[] {
+  const path = findAgentFile(agentId);
   if (!path) return [];
 
   const raw = readFileSync(path, "utf-8");
   const lines = raw.split("\n").filter(Boolean);
 
-  // Pass 1: collect all entries
   interface RawEntry {
     type: string;
     uuid: string;
     timestamp: string;
     isMeta?: boolean;
+    parentUuid?: string;
     message?: Record<string, unknown>;
+    attachment?: { fileName?: string; filename?: string; path?: string };
   }
+
   const entries: RawEntry[] = [];
+  const attachmentsByParent = new Map<string, string[]>();
+
   for (const line of lines) {
     try {
       const e = JSON.parse(line) as RawEntry;
-      if (e.type === "user" || e.type === "assistant") entries.push(e);
-    } catch { }
+      if (e.type === "user" || e.type === "assistant") {
+        entries.push(e);
+      } else if (e.type === "attachment" && e.parentUuid) {
+        const a = e.attachment ?? {};
+        const name = a.fileName ?? a.filename ?? a.path ?? "(attachment)";
+        const list = attachmentsByParent.get(e.parentUuid) ?? [];
+        list.push(name);
+        attachmentsByParent.set(e.parentUuid, list);
+      }
+      // queue-operation, last-prompt, ai-title: framework bookkeeping; skip.
+    } catch { /* malformed line — skip */ }
   }
 
-  // Pass 2: build tool result map (uuid -> results)
+  // Tool-result map: assistant turn's uuid -> list of results returned to it.
   const toolResultsByParent = new Map<string, ToolResult[]>();
   for (const e of entries) {
     if (e.type !== "user" || !e.message) continue;
@@ -103,7 +130,6 @@ export function loadSessionDetail(sessionId: string): DetailTurn[] {
     if (!Array.isArray(content)) continue;
     const results = content.filter((b: unknown) => (b as Record<string, unknown>)["type"] === "tool_result");
     if (!results.length) continue;
-    // parentUuid links this user entry back to the assistant that fired the tool
     const parentUuid = (e as unknown as Record<string, unknown>)["parentUuid"] as string;
     if (!parentUuid) continue;
     const list: ToolResult[] = results.map((tr: unknown) => {
@@ -114,12 +140,11 @@ export function loadSessionDetail(sessionId: string): DetailTurn[] {
             .map((x: unknown) => String((x as Record<string, unknown>)["text"] ?? ""))
             .join("\n")
         : String(c ?? "");
-      return { toolUseId: String(t["tool_use_id"] ?? ""), content: txt.slice(0, 600), isError: t["is_error"] === true };
+      return { toolUseId: String(t["tool_use_id"] ?? ""), content: txt, isError: t["is_error"] === true };
     });
     toolResultsByParent.set(parentUuid, list);
   }
 
-  // Pass 3: build turns
   const turns: DetailTurn[] = [];
   for (const e of entries) {
     if (!e.message) continue;
@@ -129,11 +154,18 @@ export function loadSessionDetail(sessionId: string): DetailTurn[] {
       const content = e.message["content"];
       if (Array.isArray(content)) {
         const hasOnlyToolResults = content.every((b: unknown) => (b as Record<string, unknown>)["type"] === "tool_result");
-        if (hasOnlyToolResults) continue; // handled as part of assistant turn
+        if (hasOnlyToolResults) continue;
       }
       const text = contentText(content);
       if (!text.trim()) continue;
-      turns.push({ kind: "human", uuid: e.uuid, timestamp: e.timestamp, text });
+      const attachments = attachmentsByParent.get(e.uuid);
+      turns.push({
+        kind: "human",
+        uuid: e.uuid,
+        timestamp: e.timestamp,
+        text,
+        ...(attachments && attachments.length ? { attachments } : {}),
+      });
 
     } else if (e.type === "assistant") {
       const content = (e.message["content"] as unknown[]) ?? [];
@@ -143,13 +175,13 @@ export function loadSessionDetail(sessionId: string): DetailTurn[] {
       for (const block of content) {
         const b = block as Record<string, unknown>;
         if (b["type"] === "text") {
-          textParts.push(String(b["text"] ?? "").slice(0, 800));
+          textParts.push(String(b["text"] ?? ""));
         } else if (b["type"] === "tool_use") {
           const inputStr = JSON.stringify(b["input"] ?? {});
           toolCalls.push({
             id: String(b["id"] ?? ""),
             name: String(b["name"] ?? "unknown"),
-            inputSummary: inputStr.slice(0, 300),
+            inputSummary: inputStr,
           });
         }
         // skip thinking blocks
@@ -163,7 +195,7 @@ export function loadSessionDetail(sessionId: string): DetailTurn[] {
         uuid: e.uuid,
         timestamp: e.timestamp,
         model: String(e.message["model"] ?? ""),
-        text: textParts.join("\n").slice(0, 800),
+        text: textParts.join("\n"),
         toolCalls,
         toolResults,
         usage: usage ? {

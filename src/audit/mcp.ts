@@ -74,11 +74,14 @@ function getMcpScope(name: string): McpServer["scope"] {
   // Claude.ai-hosted MCPs are identified by name prefix
   if (name.startsWith("claude.ai ") || name.startsWith("claude.ai/")) return "claude.ai";
   try {
-    const proc = Bun.spawnSync({ cmd: [CLAUDE_BIN, "mcp", "get", name], stdout: "pipe", stderr: "ignore", timeout: 3000 });
+    // `claude mcp get` health-checks the server before printing, which can
+    // take several seconds — a short timeout reports every scope as unknown.
+    const proc = Bun.spawnSync({ cmd: [CLAUDE_BIN, "mcp", "get", name], stdout: "pipe", stderr: "ignore", timeout: 15000 });
     const out = proc.stdout.toString("utf-8");
     if (out.includes("Local config")) return "local";
     if (out.includes("Project config")) return "project";
     if (out.includes("User config")) return "user";
+    if (out.includes("claude.ai config")) return "claude.ai";
   } catch { /* ignore */ }
   return "unknown";
 }
@@ -93,9 +96,12 @@ export function getMcpAudit(): McpAudit {
     const proc = Bun.spawnSync({ cmd: [CLAUDE_BIN, "mcp", "list"], stdout: "pipe", stderr: "pipe", timeout: 20000 });
     const output = proc.stdout.toString("utf-8") + proc.stderr.toString("utf-8");
 
-    // Output format: "<name>: <connection-info> - ✓ Connected" or "✗ Error..."
+    // Output format: "<name>: <connection-info> - ✔ Connected" or "✘ Error…".
+    // Accept every check/cross variant the CLI has used (✓ U+2713, ✔ U+2714,
+    // ✗ U+2717, ✘ U+2718) — matching the wrong codepoint silently empties the
+    // whole list.
     for (const line of output.split("\n")) {
-      const m = line.match(/^(.+?):\s+(.+?)\s+-\s+[✓✗]/);
+      const m = line.match(/^(.+?):\s+(.+?)\s+-\s+[✓✔✗✘×xX]/u);
       if (!m) continue;
       const name = m[1].trim();
       const connInfo = m[2].trim();
