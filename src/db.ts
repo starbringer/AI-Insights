@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DB_PATH } from "./paths";
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 let _db: Database | null = null;
 
@@ -118,16 +118,20 @@ function initSchema(db: Database): void {
   // tool calls, hook fires, API errors, compactions, model fallbacks.
   // Powers the audit page with recorded counts instead of guesses.
   db.run(`CREATE TABLE IF NOT EXISTS events (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider  TEXT NOT NULL,
-    agent_id  TEXT NOT NULL,
-    run_id    TEXT NOT NULL,
-    ts        TEXT NOT NULL,
-    kind      TEXT NOT NULL,   -- prompt | tool | hook | api_error | compact | fallback
-    detail    TEXT,            -- tool name / hook command / error status / …
-    dedupe    TEXT             -- source uuid: makes incremental re-parses idempotent
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider    TEXT NOT NULL,
+    agent_id    TEXT NOT NULL,
+    run_id      TEXT NOT NULL,
+    ts          TEXT NOT NULL,
+    kind        TEXT NOT NULL,   -- prompt | tool | hook | api_error | compact | fallback
+    detail      TEXT,            -- tool name / hook command / error status / …
+    dedupe      TEXT,            -- source uuid: makes incremental re-parses idempotent
+    tool_use_id TEXT,            -- provider's tool call id: links tool_result back to its call
+    tokens      INTEGER NOT NULL DEFAULT 0,  -- est. tokens of tool input + result (chars/4)
+    extra       TEXT             -- skill name for Skill tool calls
   )`);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_events_dedupe ON events(agent_id, dedupe)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, ts)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_events_tool_use ON events(agent_id, tool_use_id)`);
 }

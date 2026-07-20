@@ -96,6 +96,59 @@ export function getTotals(db: Database, sinceDate?: string): TurnTotals {
   return { input, cacheCreate5m: cw5m, cacheCreate1h: cw1h, cacheRead: cr, output, total, totalCost };
 }
 
+// ===== Time ranges for the dashboard's per-chart range buttons =====
+
+export type RangeKey = "1h" | "24h" | "7d" | "30d";
+
+export function parseRange(raw: string | undefined): RangeKey | null {
+  return raw === "1h" || raw === "24h" || raw === "7d" || raw === "30d" ? raw : null;
+}
+
+/**
+ * Window start for a range. Hour-scale ranges are rolling (literal "last N
+ * hours"); day-scale ranges anchor to local midnight so daily buckets line up
+ * with calendar days ("last 7 days" = today plus the 6 days before it).
+ */
+export function rangeSinceIso(range: RangeKey): string {
+  switch (range) {
+    case "1h":  return new Date(Date.now() - 3600_000).toISOString();
+    case "24h": return new Date(Date.now() - 24 * 3600_000).toISOString();
+    case "7d":  return localMidnightIso(6);
+    case "30d": return localMidnightIso(29);
+  }
+}
+
+// Bucket granularity per range: 5-minute slices for 1h, hours for 24h,
+// calendar days otherwise. Labels are local time.
+function bucketExpr(range: RangeKey): string {
+  switch (range) {
+    case "1h":
+      return `strftime('%H:', ts, 'localtime') || printf('%02d', (CAST(strftime('%M', ts, 'localtime') AS INTEGER) / 5) * 5)`;
+    case "24h":
+      return `strftime('%m-%d %H:00', ts, 'localtime')`;
+    default:
+      return `date(ts, 'localtime')`;
+  }
+}
+
+/** Token series bucketed to match the range: 5-min / hourly / daily. */
+export function getRangeSeries(db: Database, range: RangeKey): DailyStat[] {
+  const bucket = bucketExpr(range);
+  return db.query<DailyStat, [string]>(
+    `SELECT
+       ${bucket} as date,
+       SUM(input_tokens)    as input,
+       SUM(cache_create_5m) as cacheCreate5m,
+       SUM(cache_create_1h) as cacheCreate1h,
+       SUM(cache_read)      as cacheRead,
+       SUM(output_tokens)   as output,
+       SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
+     FROM turns WHERE ts >= ?
+     GROUP BY ${bucket}
+     ORDER BY MIN(ts)`
+  ).all(rangeSinceIso(range));
+}
+
 export function getDailySeries(db: Database, days = 30): DailyStat[] {
   const since = localMidnightIso(days);
   return db.query<DailyStat, [string]>(
@@ -114,8 +167,9 @@ export function getDailySeries(db: Database, days = 30): DailyStat[] {
 }
 
 export function getModelStats(db: Database, sinceDate?: string): ModelStat[] {
-  const where = sinceDate ? `WHERE ts >= '${sinceDate}'` : "";
-  return db.query<ModelStat, []>(
+  // Parameterized because /api/models passes the caller-supplied `since`
+  // straight through; empty string compares <= every ISO ts, i.e. no filter.
+  return db.query<ModelStat, [string]>(
     `SELECT
        COALESCE(model, 'unknown') as model,
        SUM(input_tokens)    as input,
@@ -124,10 +178,10 @@ export function getModelStats(db: Database, sinceDate?: string): ModelStat[] {
        SUM(cache_read)      as cacheRead,
        SUM(output_tokens)   as output,
        SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-     FROM turns ${where}
+     FROM turns WHERE ts >= ?
      GROUP BY model
      ORDER BY total DESC`
-  ).all();
+  ).all(sinceDate ?? "");
 }
 
 export function getAgents(db: Database, opts: {
@@ -179,12 +233,12 @@ export function getAgents(db: Database, opts: {
   return { rows, total: countRow?.n ?? 0 };
 }
 
-export function getProjects(db: Database): {
+export function getProjects(db: Database, since?: string): {
   cwd: string; runCount: number; agentCount: number; totalTokens: number; lastActive: string | null;
 }[] {
   return db.query<{
     cwd: string; runCount: number; agentCount: number; totalTokens: number; lastActive: string | null;
-  }, []>(
+  }, [string]>(
     `SELECT
        a.cwd,
        COUNT(DISTINCT a.run_id) as runCount,
@@ -195,12 +249,65 @@ export function getProjects(db: Database): {
      LEFT JOIN (
        SELECT agent_id,
          SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-       FROM turns GROUP BY agent_id
+       FROM turns WHERE ts >= ? GROUP BY agent_id
      ) t ON a.agent_id = t.agent_id
      WHERE a.cwd IS NOT NULL
      GROUP BY a.cwd
      ORDER BY lastActive DESC NULLS LAST`
-  ).all();
+  ).all(since ?? "");
+}
+
+// ===== MCP / Skill usage from the recorded tool-event stream =====
+// events.tokens holds a chars/4 estimate of each tool call's input + result
+// payload — the context those calls actually injected into the conversation.
+
+export interface McpUsageStat {
+  server: string;
+  calls: number;
+  tokens: number;
+  tools: { tool: string; calls: number; tokens: number }[];
+}
+
+export function getMcpUsage(db: Database, since: string): McpUsageStat[] {
+  const rows = db.query<{ detail: string; calls: number; tokens: number }, [string]>(
+    `SELECT detail, COUNT(*) as calls, SUM(tokens) as tokens
+     FROM events
+     WHERE kind = 'tool' AND detail LIKE 'mcp\\_\\_%' ESCAPE '\\' AND ts >= ?
+     GROUP BY detail`
+  ).all(since);
+
+  const byServer = new Map<string, McpUsageStat>();
+  for (const r of rows) {
+    // detail = "mcp__<server>__<tool>"
+    const rest = r.detail.slice(5);
+    const sep = rest.indexOf("__");
+    const server = sep === -1 ? rest : rest.slice(0, sep);
+    const tool = sep === -1 ? "(unknown)" : rest.slice(sep + 2);
+    const entry = byServer.get(server) ?? { server, calls: 0, tokens: 0, tools: [] };
+    entry.calls += r.calls;
+    entry.tokens += r.tokens ?? 0;
+    entry.tools.push({ tool, calls: r.calls, tokens: r.tokens ?? 0 });
+    byServer.set(server, entry);
+  }
+  return [...byServer.values()]
+    .map(s => ({ ...s, tools: s.tools.sort((a, b) => b.tokens - a.tokens) }))
+    .sort((a, b) => b.tokens - a.tokens);
+}
+
+export interface SkillUsageStat {
+  skill: string;
+  calls: number;
+  tokens: number;
+}
+
+export function getSkillUsage(db: Database, since: string): SkillUsageStat[] {
+  return db.query<SkillUsageStat, [string]>(
+    `SELECT extra as skill, COUNT(*) as calls, SUM(tokens) as tokens
+     FROM events
+     WHERE kind = 'tool' AND detail = 'Skill' AND extra IS NOT NULL AND ts >= ?
+     GROUP BY extra
+     ORDER BY tokens DESC`
+  ).all(since);
 }
 
 export function getCacheHitRate(db: Database, sinceDate?: string): number {

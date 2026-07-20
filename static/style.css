@@ -1088,3 +1088,89 @@ tbody tr:hover td { background: var(--accent-soft); }
 }
 .nd-pre.code { font-family: "Cascadia Code", ui-monospace, monospace; font-size: 11px; }
 .nd-section.err .nd-pre { box-shadow: inset 0 0 0 1px var(--tint-red); }
+
+/* =================================================================
+   Per-chart time-range switcher (1h / 24h / 7d / 30d)
+   ================================================================= */
+.chart-card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.chart-card-head .chart-card-title { margin-bottom: 14px; }
+.title-note {
+  font-size: 9.5px; font-weight: 600; color: var(--text-faint);
+  text-transform: none; letter-spacing: .02em;
+}
+.range-group {
+  display: inline-flex; gap: 4px;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  box-shadow: var(--nm-inset-sm);
+}
+.range-btn {
+  border: none;
+  padding: 4px 10px;
+  border-radius: calc(var(--r-sm) - 3px);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .03em;
+  cursor: pointer;
+  transition: color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.range-btn:hover { color: var(--text); }
+.range-btn.active {
+  background: var(--surface);
+  color: var(--accent-strong);
+  box-shadow: var(--nm-raised-sm);
+}
+
+/* =================================================================
+   Audit — MCP server table with expandable tool/schema details
+   ================================================================= */
+.mcp-server-row.expandable { cursor: pointer; }
+.mcp-server-row.expandable:hover td { color: var(--text); }
+.mcp-server-row.expandable:hover code { color: var(--accent-strong); }
+.mcp-expand-caret { color: var(--text-faint); font-size: 10px; display: inline-block; width: 11px; }
+.mcp-server-row.open .mcp-expand-caret { color: var(--accent); }
+
+.mcp-tools-row td { padding: 0 0 10px; }
+.mcp-tools-list {
+  margin: 6px 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  box-shadow: var(--nm-inset-sm);
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 380px; overflow: auto;
+}
+.mcp-tool-head { display: flex; align-items: baseline; gap: 10px; }
+.mcp-tool-head code { font-size: 11px; color: var(--text); }
+.mcp-tool-tokens { font-size: 10px; color: var(--text-faint); white-space: nowrap; }
+.mcp-tool-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; line-height: 1.5; }
+.mcp-tool-schema summary {
+  cursor: pointer; font-size: 10.5px; font-weight: 600;
+  color: var(--accent); user-select: none; list-style: none; margin-top: 3px;
+}
+.mcp-tool-schema summary::-webkit-details-marker { display: none; }
+.mcp-tool-schema summary::before { content: "▸ "; }
+.mcp-tool-schema[open] summary::before { content: "▾ "; }
+.mcp-tool-schema pre {
+  margin-top: 6px; padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunken);
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 10px; line-height: 1.5;
+  color: var(--text-dim);
+  max-height: 260px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.mcp-diagnostics { margin-top: 8px; }
+.mcp-diagnostics summary {
+  cursor: pointer; font-size: 11px; font-weight: 600;
+  color: var(--c-amber); user-select: none; list-style: none;
+}
+.mcp-diagnostics summary::-webkit-details-marker { display: none; }
+.mcp-diagnostics summary::before { content: "▸ "; }
+.mcp-diagnostics[open] summary::before { content: "▾ "; }
+.mcp-diagnostics ul { margin: 6px 0 0 16px; font-size: 11px; color: var(--text-dim); line-height: 1.7; }

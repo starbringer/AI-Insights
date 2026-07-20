@@ -86,21 +86,49 @@
             <div class="kpi-card skeleton"></div>
           </div>
           <div class="chart-card">
-            <div class="chart-card-title">30-day token trend</div>
+            <div class="chart-card-head">
+              <div class="chart-card-title">Token trend</div>
+              <div class="range-group" data-chart="trend"></div>
+            </div>
             <div id="chart-trend" style="height:260px"></div>
           </div>
           <div class="chart-row">
             <div class="chart-card">
-              <div class="chart-card-title">Token usage by model (30 days)</div>
+              <div class="chart-card-head">
+                <div class="chart-card-title">Token usage by model</div>
+                <div class="range-group" data-chart="models"></div>
+              </div>
               <div id="chart-models" style="height:220px"></div>
             </div>
             <div class="chart-card">
-              <div class="chart-card-title">Top projects by tokens (30 days)</div>
+              <div class="chart-card-head">
+                <div class="chart-card-title">Top projects by tokens</div>
+                <div class="range-group" data-chart="projects"></div>
+              </div>
               <div id="chart-projects" style="height:220px"></div>
             </div>
           </div>
+          <div class="chart-row">
+            <div class="chart-card">
+              <div class="chart-card-head">
+                <div class="chart-card-title" title="Estimated from recorded MCP tool calls: input arguments + returned results, ~4 chars/token">MCP token usage <span class="title-note">est.</span></div>
+                <div class="range-group" data-chart="mcp"></div>
+              </div>
+              <div id="chart-mcp-usage" style="height:220px"></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-head">
+                <div class="chart-card-title" title="Estimated from recorded Skill invocations: arguments + injected skill content, ~4 chars/token">Skill token usage <span class="title-note">est.</span></div>
+                <div class="range-group" data-chart="skills"></div>
+              </div>
+              <div id="chart-skill-usage" style="height:220px"></div>
+            </div>
+          </div>
           <div class="chart-card">
-            <div class="chart-card-title">Top 10 runs by tokens — click a bar to open its detail</div>
+            <div class="chart-card-head">
+              <div class="chart-card-title">Top 10 runs by tokens — click a bar to open its detail</div>
+              <div class="range-group" data-chart="topRuns"></div>
+            </div>
             <div id="chart-top-runs" style="height:340px"></div>
           </div>
         </section>

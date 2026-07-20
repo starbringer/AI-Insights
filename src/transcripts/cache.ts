@@ -117,15 +117,32 @@ export interface EventRecord {
   kind: "prompt" | "tool" | "hook" | "api_error" | "compact" | "fallback";
   detail: string | null;
   dedupe: string;
+  tool_use_id?: string | null;
+  tokens?: number;
+  extra?: string | null;
 }
 
 /** Idempotent on (agent_id, dedupe) so incremental re-parses never double count. */
 export function insertEvent(db: Database, e: EventRecord): void {
   db.run(
-    `INSERT INTO events(provider,agent_id,run_id,ts,kind,detail,dedupe)
-     VALUES(?,?,?,?,?,?,?)
+    `INSERT INTO events(provider,agent_id,run_id,ts,kind,detail,dedupe,tool_use_id,tokens,extra)
+     VALUES(?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(agent_id, dedupe) DO NOTHING`,
-    [e.provider, e.agent_id, e.run_id, e.ts, e.kind, e.detail, e.dedupe]
+    [e.provider, e.agent_id, e.run_id, e.ts, e.kind, e.detail, e.dedupe,
+     e.tool_use_id ?? null, e.tokens ?? 0, e.extra ?? null]
+  );
+}
+
+/**
+ * Fold a tool_result's estimated tokens into its originating tool event.
+ * Safe across incremental parses: the byte-offset cursor guarantees each
+ * result line is processed exactly once, and the tool event row already
+ * exists because the call always precedes its result in the transcript.
+ */
+export function addEventResultTokens(db: Database, agentId: string, toolUseId: string, tokens: number): void {
+  db.run(
+    `UPDATE events SET tokens = tokens + ? WHERE agent_id = ? AND tool_use_id = ?`,
+    [tokens, agentId, toolUseId]
   );
 }
 

@@ -42,7 +42,7 @@ export async function getAuditReport(db: Database, projectPaths: string[] = [], 
     Promise.resolve(getClaudeMdAudit(db, projectPaths)),
     Promise.resolve(getHooksAudit(db)),
     Promise.resolve(getSkillsAudit()),
-    Promise.resolve(getMcpAudit()),
+    getMcpAudit(forceRefresh),
     Promise.resolve(getPluginsAudit()),
     Promise.resolve(getSettingsAudit()),
   ]);

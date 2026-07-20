@@ -2,12 +2,19 @@ import { openSync, readSync, closeSync, statSync, readdirSync, readFileSync, exi
 import { basename, dirname, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { extractTitle } from "./titles";
-import { getFileRecord, upsertFile, insertTurn, insertEvent, upsertAgent } from "../../transcripts/cache";
+import { getFileRecord, upsertFile, insertTurn, insertEvent, upsertAgent, addEventResultTokens } from "../../transcripts/cache";
 import type { FileRecord, AgentRecord } from "../../transcripts/cache";
 import { PROJECTS_DIR } from "../../paths";
 import { resolveRunIdsForProvider, refreshRuns, recomputeAgentActivity } from "../../transcripts/runs";
 
 const PROVIDER_ID = "claude-code";
+
+// Tool payload sizes are chart estimates over the full transcript history —
+// chars/4 keeps the startup rescan fast where real tokenization would take
+// minutes on multi-hundred-MB transcript sets.
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
 
 function findJsonlFiles(dir: string): string[] {
   const results: string[] = [];
@@ -66,6 +73,11 @@ interface ParseCtx {
   startedAt: string | null;
   lastTs: string | null;
   turnCount: number;
+  // Skill invocations return a stub tool_result ("Tool loaded.") — the actual
+  // skill content arrives as the NEXT user line with isMeta=true. Track ids of
+  // pending Skill calls so that injected content gets attributed to them.
+  skillToolUseIds: Set<string>;
+  pendingSkillResultId: string | null;
 }
 
 function readSubagentMeta(jsonlPath: string): { agent_type: string | null; description: string | null } {
@@ -112,6 +124,8 @@ export function parseFileIncremental(
     startedAt: null,
     lastTs: null,
     turnCount: 0,
+    skillToolUseIds: new Set(),
+    pendingSkillResultId: null,
   };
 
   if (startOffset >= stat.size) {
@@ -200,11 +214,12 @@ function processLine(
   if (!line.type) return;
 
   const emit = (kind: "prompt" | "tool" | "hook" | "api_error" | "compact" | "fallback",
-                detail: string | null, dedupe: string) => {
+                detail: string | null, dedupe: string,
+                extras?: { tool_use_id?: string | null; tokens?: number; extra?: string | null }) => {
     insertEvent(db, {
       provider: PROVIDER_ID, agent_id: agentId, run_id: runId,
       ts: line.timestamp ?? new Date().toISOString(),
-      kind, detail, dedupe,
+      kind, detail, dedupe, ...extras,
     });
   };
 
@@ -225,9 +240,47 @@ function processLine(
     const blocks = line.message.content as Record<string, unknown>[];
     blocks.forEach((b, i) => {
       if (b["type"] === "tool_use") {
-        emit("tool", String(b["name"] ?? "unknown"), `${line.uuid}:${i}`);
+        const name = String(b["name"] ?? "unknown");
+        const input = b["input"] as Record<string, unknown> | undefined;
+        const skill = name === "Skill" && typeof input?.["skill"] === "string" ? input["skill"] : null;
+        const toolUseId = typeof b["id"] === "string" ? b["id"] : null;
+        if (skill && toolUseId) ctx.skillToolUseIds.add(toolUseId);
+        emit("tool", name, `${line.uuid}:${i}`, {
+          tool_use_id: toolUseId,
+          tokens: estimateTokens(input === undefined ? "" : JSON.stringify(input)),
+          extra: skill,
+        });
       }
     });
+    // An assistant line means any pending skill injection window has passed.
+    ctx.pendingSkillResultId = null;
+  }
+
+  // Tool results come back as user lines; fold their size into the tool event
+  // so per-tool token attribution covers input AND result payloads.
+  if (line.type === "user" && Array.isArray(line.message?.content)) {
+    for (const b of line.message.content as Record<string, unknown>[]) {
+      if (b["type"] !== "tool_result" || typeof b["tool_use_id"] !== "string") continue;
+      const toolUseId = b["tool_use_id"];
+      const content = b["content"];
+      const text = typeof content === "string" ? content
+        : content === undefined ? "" : JSON.stringify(content);
+      if (text) addEventResultTokens(db, agentId, toolUseId, estimateTokens(text));
+      if (ctx.skillToolUseIds.delete(toolUseId)) ctx.pendingSkillResultId = toolUseId;
+    }
+  }
+
+  // The line right after a Skill tool_result is an isMeta user line carrying
+  // the injected skill content — attribute its size to that Skill call.
+  if (ctx.pendingSkillResultId && line.type === "user" && line.isMeta && Array.isArray(line.message?.content)) {
+    let injected = 0;
+    for (const b of line.message.content as Record<string, unknown>[]) {
+      if (b["type"] === "text" && typeof b["text"] === "string") injected += estimateTokens(b["text"]);
+    }
+    if (injected) {
+      addEventResultTokens(db, agentId, ctx.pendingSkillResultId, injected);
+      ctx.pendingSkillResultId = null;
+    }
   }
 
   // Framework events

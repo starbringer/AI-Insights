@@ -72,10 +72,14 @@ Sub-agents are detected from the provider's own data — for Claude Code that's 
 
 ### Dashboard
 - 5 KPI cards: today, 7-day, 30-day totals (each with API-equiv cost), cache hit rate, **active runs**
-- Daily 30-day token trend chart (stacked: input / output / cache write / cache read)
+- Token trend chart (stacked: input / output / cache write / cache read)
 - Token usage by model — stacked horizontal bar
 - Top projects by tokens — horizontal bar (with run + agent counts)
+- **MCP token usage** — estimated tokens flowing through each MCP server's tool calls (input arguments + returned results, ~4 chars/token), with a per-tool breakdown in the tooltip
+- **Skill token usage** — estimated tokens per skill invocation (arguments + the injected skill content)
 - **Top 10 runs by tokens** — stacked horizontal bar; click a bar to open that run's detail page
+
+Every token chart has its own **time-range switcher** — `1h` / `24h` / `7d` / `30d` (last 1 hour, 24 hours, 7 days, 30 days). Buckets adapt to the range: 5-minute slices for 1h, hourly for 24h, daily otherwise. Each chart remembers its selection (`localStorage`).
 
 ### Audit
 Data-driven findings about your Claude Code configuration:
@@ -84,7 +88,7 @@ Data-driven findings about your Claude Code configuration:
 |---------|--------|
 | CLAUDE.md size | Global **and per-project** CLAUDE.md files (projects discovered from your transcripts, case-deduped), word/token counts, injected tokens per day = global size × agents active that day |
 | Hook volume | Hook entries from settings.json/.claude.json (with matchers) × **recorded** fires from the transcript event stream: real prompt counts for UserPromptSubmit, real Stop-hook fires, Pre/PostToolUse counted against the entry's matcher regex over actual tool calls |
-| MCP servers | All servers from `claude mcp list` with scope (user/local/project/claude.ai) + schema tokens per turn (live JSON-RPC probe of stdio servers) + estimated 30-day injection cost (schema tokens × agents in last 30d) |
+| MCP servers | All servers enumerated **directly from config files** — `~/.claude.json` (user + local scope), each project's `.mcp.json` (project scope), and claude.ai-hosted connector names — never from `claude mcp list` (see below). Tool lists and input schemas come from live probes (JSON-RPC over stdio, streamable HTTP for remote servers); **click a server row to expand its tools, per-tool token counts, descriptions, and JSON schemas**. Shows schema tokens per server + estimated 30-day injection cost. Enumeration/probe failures surface in a **diagnostics** panel instead of silently emptying the list |
 | Cache efficiency | Hit rate over time (line chart + gauge) |
 | Skills | Installed skills list with SKILL.md token count (per-invocation cost) |
 | Settings | Default model + effort level, permission allow/deny rule counts, auto-approve warning |
@@ -92,6 +96,10 @@ Data-driven findings about your Claude Code configuration:
 | Model mix | Token share per model (last 30 days) |
 
 Each finding has a configurable threshold (warn/error) you can adjust in the Settings tab.
+
+**Why MCP servers are read from config files, not the CLI:** earlier versions shelled out to `claude mcp list` and parsed its human-readable output. That broke repeatedly without any code change — the CLI health-checks every server before printing (so a slow server or cold network blanked the whole list past the spawn timeout), and its output format drifts between CLI versions. The audit now reads the same files the CLI itself reads (`~/.claude.json`, `.mcp.json`), which is deterministic and instant; only the optional tool/schema probes touch the servers, their results are cached for 10 minutes per config definition, and any failure is reported in the card's diagnostics section.
+
+**Probe consent:** project-scope servers ship inside the repo's `.mcp.json` (third-party content), and Claude Code only runs them after you approve them per project. The audit mirrors that: unapproved or disabled project servers are *listed* with their scope but never executed or contacted — their row explains why no tool data is shown. claude.ai-hosted connectors are listed by name only (their definitions live in your account, not on disk).
 
 ### Runs
 Paginated table of all runs with title, project, **agent count** (× N badge when > 1), turn count, token totals, and last-active time. Supports search and project filter.
@@ -187,7 +195,7 @@ src/
   audit/
     claudeMd.ts            CLAUDE.md size audit
     hooks.ts               Settings.json hooks audit
-    mcp.ts                 MCP server schema token audit (JSON-RPC probe)
+    mcp.ts                 MCP audit: config-file enumeration (user/local/project/claude.ai scopes) + tool/schema probes (stdio JSON-RPC, streamable HTTP) + diagnostics
     plugins.ts             Plugin list audit
     skills.ts              Skills directory audit
     settings.ts            Model + permissions audit
@@ -195,7 +203,7 @@ src/
   watcher.ts               chokidar watcher → dispatches changes to the owning provider
   api/
     auditEndpoints.ts      GET/POST /api/audit, GET/PUT /api/thresholds, pricing
-    transcriptEndpoints.ts /api/stats, /api/timeseries, /api/models, /api/projects, /api/runs, /api/run/:id, /api/agents, /api/agent/:id (flat turns), /api/agent/:id/tree (session tree), /api/top-runs, /api/top-turns
+    transcriptEndpoints.ts /api/stats, /api/timeseries, /api/models, /api/projects, /api/runs, /api/run/:id, /api/agents, /api/agent/:id (flat turns), /api/agent/:id/tree (session tree), /api/top-runs, /api/top-turns, /api/mcp-usage, /api/skill-usage (timeseries/models/projects/top-runs/mcp-usage/skill-usage all accept ?range=1h|24h|7d|30d)
     providersEndpoint.ts   GET /api/providers
 static/
   index.html               Sidebar SPA shell (4 tabs + session-detail overlay)
@@ -214,7 +222,7 @@ SQLite at `data/cache.db` (WAL mode). Five tables, all carrying a `provider` col
 - **`runs`** — derived roll-up, one row per logical run: title, cwd, agent count, turn count, first/last seen. Rebuilt from `agents`/`turns` after every full scan **and** after every incremental ingest (debounced), so the Runs page stays live without a restart.
 - **`agents`** — one row per agent (one transcript file). Carries `run_id`, `parent_agent_id`, `parent_turn_index` (for ordering siblings), `agent_type`, `description` (from sub-agent `meta.json` when present), title, cwd, last seen, turn count.
 - **`turns`** — one row per API call, **unique on (agent_id, message_id)**: agent_id, run_id, message_id, request_id, model, token counts, timestamp. The unique index is what deduplicates Claude Code's one-line-per-content-block format. Source of truth for token totals, turn counts, and last-seen times — all recomputed from here, never trusted from a maintained counter (incremental parsing of timestamp-less trailing records like `ai-title`/`mode`/`summary` would otherwise zero out turn counts or null out `last_seen_at`).
-- **`events`** — lightweight event stream extracted during parsing, idempotent on (agent_id, source uuid): real user prompts, tool calls (with tool name), hook fires, API errors, compactions, model fallbacks. Powers the audit page's recorded (not estimated) counts.
+- **`events`** — lightweight event stream extracted during parsing, idempotent on (agent_id, source uuid): real user prompts, tool calls (with tool name), hook fires, API errors, compactions, model fallbacks. Tool events additionally carry the provider's `tool_use_id`, an estimated token size (input arguments + tool result, ~4 chars/token; for Skill calls also the injected skill content), and the skill name for Skill invocations. Powers the audit page's recorded (not estimated) counts and the dashboard's MCP/skill usage charts.
 
 The schema is versioned (`PRAGMA user_version`). When the app starts and finds a different version it drops and recreates everything, then re-parses every transcript. You can also delete `data/cache.db` at any time to force a full rebuild.
 

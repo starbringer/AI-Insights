@@ -287,8 +287,9 @@ export interface TopRunStat {
   total: number;
 }
 
-export function getTopRuns(db: Database, limit = 10): TopRunStat[] {
-  return db.query<TopRunStat, [number]>(
+export function getTopRuns(db: Database, limit = 10, since?: string): TopRunStat[] {
+  // Empty `since` compares <= every ISO timestamp, i.e. no filter.
+  return db.query<TopRunStat, [string, number]>(
     `SELECT
        r.run_id, r.title, r.cwd, r.last_seen_at, r.agent_count, r.turn_count,
        t.model, t.input, t.cacheCreate5m, t.cacheCreate1h, t.cacheRead, t.output, t.total
@@ -303,9 +304,10 @@ export function getTopRuns(db: Database, limit = 10): TopRunStat[] {
          SUM(output_tokens)   as output,
          SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
        FROM turns
+       WHERE ts >= ?
        GROUP BY run_id
      ) t ON r.run_id = t.run_id
      ORDER BY t.total DESC
      LIMIT ?`
-  ).all(limit);
+  ).all(since ?? "", limit);
 }

@@ -274,39 +274,63 @@ function loadTab(tab) {
 
 // ===== Dashboard =====
 
+// Every token-usage chart carries its own time-range switcher.
+const RANGES = [['1h', 'Last 1 hour'], ['24h', 'Last 24 hours'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days']];
+
+const chartRanges = (() => {
+  try { return { ...JSON.parse(localStorage.getItem('chartRanges') || '{}') }; }
+  catch { return {}; }
+})();
+function chartRange(key) {
+  return RANGES.some(([r]) => r === chartRanges[key]) ? chartRanges[key] : '30d';
+}
+
+const CHART_LOADERS = {
+  trend:    async r => renderTrendChart(await api(`/timeseries?range=${r}`)),
+  models:   async r => renderModelsChart(await api(`/models?range=${r}`)),
+  projects: async r => renderProjectsChart(await api(`/projects?range=${r}`)),
+  mcp:      async r => renderMcpUsageChart(await api(`/mcp-usage?range=${r}`)),
+  skills:   async r => renderSkillUsageChart(await api(`/skill-usage?range=${r}`)),
+  topRuns:  async r => renderTopRunsChart(await api(`/top-runs?limit=10&range=${r}`)),
+};
+
+function initRangeGroups() {
+  document.querySelectorAll('.range-group').forEach(group => {
+    const key = group.dataset.chart;
+    if (!CHART_LOADERS[key]) return;
+    group.innerHTML = RANGES.map(([r, label]) =>
+      `<button class="range-btn${chartRange(key) === r ? ' active' : ''}" data-range="${r}" title="${esc(label)}">${esc(r)}</button>`
+    ).join('');
+    group.querySelectorAll('.range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        chartRanges[key] = btn.dataset.range;
+        localStorage.setItem('chartRanges', JSON.stringify(chartRanges));
+        group.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b === btn));
+        CHART_LOADERS[key](btn.dataset.range).catch(e => console.warn(`Chart ${key} failed:`, e.message));
+      });
+    });
+  });
+}
+
 async function loadDashboard() {
-  const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
-  const calls = [
-    ['stats',     '/stats'],
-    ['series',    '/timeseries?days=30'],
-    ['models',    `/models?since=${ago30}`],
-    ['projects',  '/projects'],
-    ['topRuns',   '/top-runs?limit=10'],
+  const jobs = [
+    ['stats', async () => renderKpiCards(await api('/stats'))],
+    ...Object.entries(CHART_LOADERS).map(([key, load]) => [key, () => load(chartRange(key))]),
   ];
 
   // allSettled so a single missing endpoint (e.g. server not restarted after
   // a new endpoint was added) doesn't blank out the whole dashboard.
-  const results = await Promise.allSettled(calls.map(([, path]) => api(path)));
+  const results = await Promise.allSettled(jobs.map(([, run]) => run()));
 
-  const data = {};
   const failures = [];
   results.forEach((r, i) => {
-    const key = calls[i][0];
-    if (r.status === 'fulfilled') data[key] = r.value;
-    else { data[key] = null; failures.push({ path: calls[i][1], err: r.reason }); }
+    if (r.status === 'rejected') failures.push({ key: jobs[i][0], err: r.reason });
   });
-
-  if (failures.length === calls.length) {
+  if (failures.length === jobs.length) {
     document.getElementById('kpi-row').innerHTML = `<p class="text-error">All dashboard endpoints failed: ${esc(failures[0].err.message)}</p>`;
     return;
   }
-  for (const f of failures) console.warn(`Dashboard endpoint failed: ${f.path} —`, f.err.message);
-
-  if (data.stats)     renderKpiCards(data.stats);
-  if (data.series)    renderTrendChart(data.series);
-  if (data.models)    renderModelsChart(data.models);
-  if (data.projects)  renderProjectsChart(data.projects);
-  if (data.topRuns)   renderTopRunsChart(data.topRuns);
+  for (const f of failures) console.warn(`Dashboard section failed: ${f.key} —`, f.err.message);
 }
 
 const SVG_A = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
@@ -359,9 +383,17 @@ function renderTrendChart(series) {
   });
 }
 
+// Range switches can land on an empty window — without an explicit empty
+// state the previous range's bars would linger on screen.
+function renderChartEmpty(chart, text) {
+  chart.clear();
+  chart.setOption({ ...baseOption(), title: { text, left: 'center', top: 'middle', textStyle: { color: COLOR.dim, fontSize: 13, fontWeight: 'normal' } } });
+}
+
 function renderModelsChart(models) {
   const chart = initChart('chart-models');
-  if (!chart || !models?.length) return;
+  if (!chart) return;
+  if (!models?.length) return renderChartEmpty(chart, 'No usage in this range');
   const palette = [COLOR.input, COLOR.output, COLOR.cacheCreate, COLOR.cacheRead, '#f04d4d'];
   const names = models.map(m => m.model.replace('claude-', '').replace(/-(\d)/g, ' $1'));
   chart.setOption({
@@ -382,8 +414,10 @@ function renderModelsChart(models) {
 
 function renderProjectsChart(projects) {
   const chart = initChart('chart-projects');
-  if (!chart || !projects?.length) return;
-  const top = [...projects].sort((a, b) => b.totalTokens - a.totalTokens).slice(0, 10);
+  if (!chart) return;
+  const top = (projects ?? []).filter(p => p.totalTokens > 0)
+    .sort((a, b) => b.totalTokens - a.totalTokens).slice(0, 10);
+  if (!top.length) return renderChartEmpty(chart, 'No usage in this range');
   const names = top.map(p => {
     const parts = (p.cwd ?? '').replace(/\\/g, '/').split('/');
     return parts[parts.length - 1] || p.cwd || '(unknown)';
@@ -406,6 +440,52 @@ function renderProjectsChart(projects) {
       },
     },
   });
+}
+
+// Shared renderer for the MCP / Skill usage cards: horizontal bars of
+// estimated tokens with call counts, plus an in-chart empty state.
+function renderUsageBarChart(chartId, rows, color, emptyText, tooltipFor) {
+  const chart = initChart(chartId);
+  if (!chart) return;
+  if (!rows?.length) return renderChartEmpty(chart, emptyText);
+  const top = rows.slice(0, 10).reverse(); // largest at the top of the bar chart
+  chart.setOption({
+    ...baseOption(),
+    grid: { left: 6, right: 76, top: 8, bottom: 8, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { formatter: v => fmt.tokens(v), color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
+    yAxis: { type: 'category', data: top.map(r => r.name), axisLabel: { color: COLOR.dim, fontSize: 11 } },
+    series: [{
+      type: 'bar', barMaxWidth: 22,
+      data: top.map(r => r.tokens),
+      itemStyle: { color },
+      label: { show: true, position: 'right', formatter: p => fmt.tokens(p.value), color: COLOR.dim, fontSize: 10 },
+    }],
+    tooltip: { formatter: p => tooltipFor(top[p.dataIndex]) },
+  });
+}
+
+function renderMcpUsageChart(servers) {
+  renderUsageBarChart(
+    'chart-mcp-usage',
+    (servers ?? []).map(s => ({ ...s, name: s.server })),
+    COLOR.purple,
+    'No MCP tool calls in this range',
+    s => {
+      const toolLines = (s.tools ?? []).slice(0, 8)
+        .map(t => `${esc(t.tool)}: ${t.calls} call${t.calls !== 1 ? 's' : ''} · ${fmt.tokens(t.tokens)}`);
+      return [`<b>${esc(s.server)}</b>`,
+              `${s.calls} call${s.calls !== 1 ? 's' : ''} · ~${fmt.tokens(s.tokens)} tokens (est.)`,
+              ...toolLines].join('<br>');
+    });
+}
+
+function renderSkillUsageChart(skills) {
+  renderUsageBarChart(
+    'chart-skill-usage',
+    (skills ?? []).map(s => ({ ...s, name: s.skill })),
+    COLOR.green,
+    'No skill invocations in this range',
+    s => `<b>${esc(s.skill)}</b><br>${s.calls} invocation${s.calls !== 1 ? 's' : ''} · ~${fmt.tokens(s.tokens)} tokens (est.)`);
 }
 
 function renderTopRunsChart(runs) {
@@ -572,46 +652,86 @@ function buildMcpCard(d, sessions30d = 0) {
   if (!d) return emptyCard('MCPs');
   const headline = `${d.servers.length} server${d.servers.length !== 1 ? 's' : ''} · ${d.totalTools} tools · ${fmt.tokens(d.totalSchemaTokens)} schema tokens`;
   const fix = `<ul>
+    <li>Servers are read from <code>~/.claude.json</code> (user + local scope) and each project's <code>.mcp.json</code> (project scope)</li>
     <li>Remove user-scope server: <code>claude mcp remove &lt;name&gt; -s user</code></li>
     <li>Remove local-scope server: <code>claude mcp remove &lt;name&gt; -s local</code></li>
     <li>Prefer servers with fewer tools to reduce schema token overhead</li>
     <li>Schema tokens are injected every session; reduce servers to save cache budget</li>
-    <li>Desktop-scope servers (Claude Desktop app) do not affect Claude Code</li>
   </ul>`;
   const scopeColor = { user:'#4d8af0', 'claude.ai':'#4df09a', desktop:'#7a7d96', local:'#f09a4d', project:'#9a4df0' };
   const card = auditCard('MCPs', d.status, headline, 'chart-mcps', 0, fix);
   const chartEl = card.querySelector('#chart-mcps');
-  if (chartEl && d.servers?.length) {
-    chartEl.style.height = 'auto';
-    const showEst = sessions30d > 0;
-    chartEl.innerHTML = `<table style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse">
-      <thead><tr>
-        <th style="text-align:left;color:var(--dim);padding:4px 8px 4px 0;font-weight:500;border-bottom:1px solid var(--border)">Name</th>
-        <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)">Scope</th>
-        <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)">Type</th>
-        <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right">Schema tokens</th>
-        ${showEst ? `<th style="color:var(--dim);padding:4px 0 4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right" title="schemaTokens × sessions in last 30d (upper bound)">Est. 30d tokens</th>` : ''}
-      </tr></thead>
-      <tbody>${d.servers.map(s => {
-        const sc = s.scope ?? 'user';
-        const color = scopeColor[sc] ?? '#7a7d96';
-        const est30d = (s.schemaTokens || 0) * sessions30d;
-        return `<tr>
-          <td style="padding:4px 8px 4px 0;white-space:nowrap"><code style="font-size:11px">${esc(s.name)}</code></td>
-          <td style="padding:4px 8px;white-space:nowrap">
-            <span style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600">${esc(sc)}</span>
-          </td>
-          <td style="padding:4px 8px;color:var(--dim);font-size:11px">${esc(s.type ?? '—')}</td>
-          <td style="padding:4px 8px;text-align:right;color:var(--dim);font-size:11px">${s.schemaTokens ? fmt.tokens(s.schemaTokens) : '—'}</td>
-          ${showEst ? `<td style="padding:4px 0 4px 8px;text-align:right;color:var(--dim);font-size:11px">${est30d ? fmt.tokens(est30d) : '—'}</td>` : ''}
-        </tr>`;
-      }).join('')}</tbody>
-    </table>
-    ${showEst ? `<p style="color:var(--dim);font-size:10px;margin-top:6px">Est. 30d = schema tokens × ${sessions30d} agents in the last 30 days (upper bound; user/local MCPs inject into every session)</p>` : ''}`;
-  } else if (chartEl) {
-    chartEl.style.height = 'auto';
-    chartEl.innerHTML = '<p style="color:var(--dim);font-size:12px;margin-top:8px">No MCP servers configured.</p>';
+  if (!chartEl) return card;
+  chartEl.style.height = 'auto';
+
+  const diagHtml = d.diagnostics?.length
+    ? `<details class="mcp-diagnostics"><summary>${d.diagnostics.length} diagnostic${d.diagnostics.length !== 1 ? 's' : ''}</summary>
+        <ul>${d.diagnostics.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>`
+    : '';
+
+  if (!d.servers?.length) {
+    chartEl.innerHTML = `<p style="color:var(--dim);font-size:12px;margin-top:8px">No MCP servers found in
+      <code>~/.claude.json</code> (user/local scope) or any project's <code>.mcp.json</code>.</p>${diagHtml}`;
+    return card;
   }
+
+  const showEst = sessions30d > 0;
+  chartEl.innerHTML = `<table class="mcp-table" style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse">
+    <thead><tr>
+      <th style="text-align:left;color:var(--dim);padding:4px 8px 4px 0;font-weight:500;border-bottom:1px solid var(--border)">Name</th>
+      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)">Scope</th>
+      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)">Type</th>
+      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right">Tools</th>
+      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right">Schema tokens</th>
+      ${showEst ? `<th style="color:var(--dim);padding:4px 0 4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right" title="schemaTokens × sessions in last 30d (upper bound)">Est. 30d tokens</th>` : ''}
+    </tr></thead>
+    <tbody>${d.servers.map((s, i) => {
+      const sc = s.scope ?? 'user';
+      const color = scopeColor[sc] ?? '#7a7d96';
+      const est30d = (s.schemaTokens || 0) * sessions30d;
+      const expandable = (s.tools?.length ?? 0) > 0;
+      const hint = expandable ? `<span class="mcp-expand-caret">▸</span> ` : '';
+      const scopeTitle = s.project ? `${sc} — ${s.project}` : sc;
+      return `<tr class="mcp-server-row${expandable ? ' expandable' : ''}" data-idx="${i}" title="${esc(s.source ?? '')}">
+        <td style="padding:4px 8px 4px 0;white-space:nowrap">${hint}<code style="font-size:11px">${esc(s.name)}</code></td>
+        <td style="padding:4px 8px;white-space:nowrap">
+          <span title="${esc(scopeTitle)}" style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600">${esc(sc)}</span>
+        </td>
+        <td style="padding:4px 8px;color:var(--dim);font-size:11px">${esc(s.type ?? '—')}</td>
+        <td style="padding:4px 8px;text-align:right;color:var(--dim);font-size:11px">${s.toolCount || (s.probeError ? `<span class="status-warn" title="${esc(s.probeError)}">?</span>` : '—')}</td>
+        <td style="padding:4px 8px;text-align:right;color:var(--dim);font-size:11px">${s.schemaTokens ? fmt.tokens(s.schemaTokens) : '—'}</td>
+        ${showEst ? `<td style="padding:4px 0 4px 8px;text-align:right;color:var(--dim);font-size:11px">${est30d ? fmt.tokens(est30d) : '—'}</td>` : ''}
+      </tr>
+      ${expandable ? `<tr class="mcp-tools-row" data-for="${i}" hidden><td colspan="${showEst ? 6 : 5}">
+        <div class="mcp-tools-list">${s.tools.map((t, ti) => `
+          <div class="mcp-tool" data-tool="${i}:${ti}">
+            <div class="mcp-tool-head">
+              <code>${esc(t.name)}</code>
+              <span class="mcp-tool-tokens">${fmt.tokens(t.tokens)} tok</span>
+            </div>
+            ${t.description ? `<div class="mcp-tool-desc">${esc(t.description)}</div>` : ''}
+            <details class="mcp-tool-schema"><summary>Input schema</summary>
+              <pre>${esc(JSON.stringify(t.inputSchema, null, 2) ?? 'null')}</pre>
+            </details>
+          </div>`).join('')}
+        </div>
+      </td></tr>` : ''}`;
+    }).join('')}</tbody>
+  </table>
+  ${showEst ? `<p style="color:var(--dim);font-size:10px;margin-top:6px">Est. 30d = schema tokens × ${sessions30d} agents in the last 30 days (upper bound; user/local MCPs inject into every session)</p>` : ''}
+  ${diagHtml}`;
+
+  // Click a server row to expand its tool list with schemas.
+  chartEl.querySelectorAll('.mcp-server-row.expandable').forEach(row => {
+    row.addEventListener('click', () => {
+      const detail = chartEl.querySelector(`.mcp-tools-row[data-for="${row.dataset.idx}"]`);
+      if (!detail) return;
+      detail.hidden = !detail.hidden;
+      row.classList.toggle('open', !detail.hidden);
+      const caret = row.querySelector('.mcp-expand-caret');
+      if (caret) caret.textContent = detail.hidden ? '▸' : '▾';
+    });
+  });
   return card;
 }
 
@@ -940,6 +1060,7 @@ function renderPricing(p) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   registerEchartsTheme();
+  initRangeGroups();
 
   document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));

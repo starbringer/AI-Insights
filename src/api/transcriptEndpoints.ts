@@ -3,6 +3,7 @@ import { getDb } from "../db";
 import {
   getTotals, getDailySeries, getAgents, getProjects,
   getModelStats, getCacheHitRate, getTopTurns, localMidnightIso,
+  parseRange, rangeSinceIso, getRangeSeries, getMcpUsage, getSkillUsage,
 } from "../transcripts/aggregate";
 import { listRuns, loadRun, getTopRuns, getActiveRuns } from "../transcripts/runs";
 import { PROVIDERS } from "../providers";
@@ -26,6 +27,8 @@ transcriptRouter.get("/stats", c => {
 
 transcriptRouter.get("/timeseries", c => {
   const db = getDb();
+  const range = parseRange(c.req.query("range"));
+  if (range) return c.json(getRangeSeries(db, range));
   const days = parseInt(c.req.query("days") ?? "30", 10);
   return c.json(getDailySeries(db, days));
 });
@@ -58,12 +61,14 @@ transcriptRouter.get("/run/:runId", c => {
 
 transcriptRouter.get("/projects", c => {
   const db = getDb();
-  return c.json(getProjects(db));
+  const range = parseRange(c.req.query("range"));
+  return c.json(getProjects(db, range ? rangeSinceIso(range) : undefined));
 });
 
 transcriptRouter.get("/models", c => {
   const db = getDb();
-  const since = c.req.query("since");
+  const range = parseRange(c.req.query("range"));
+  const since = range ? rangeSinceIso(range) : c.req.query("since");
   return c.json(getModelStats(db, since));
 });
 
@@ -76,7 +81,20 @@ transcriptRouter.get("/top-turns", c => {
 transcriptRouter.get("/top-runs", c => {
   const db = getDb();
   const limit = parseInt(c.req.query("limit") ?? "10", 10);
-  return c.json(getTopRuns(db, limit));
+  const range = parseRange(c.req.query("range"));
+  return c.json(getTopRuns(db, limit, range ? rangeSinceIso(range) : undefined));
+});
+
+transcriptRouter.get("/mcp-usage", c => {
+  const db = getDb();
+  const range = parseRange(c.req.query("range")) ?? "30d";
+  return c.json(getMcpUsage(db, rangeSinceIso(range)));
+});
+
+transcriptRouter.get("/skill-usage", c => {
+  const db = getDb();
+  const range = parseRange(c.req.query("range")) ?? "30d";
+  return c.json(getSkillUsage(db, rangeSinceIso(range)));
 });
 
 transcriptRouter.get("/agent/:agentId/tree", c => {
