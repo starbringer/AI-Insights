@@ -27,6 +27,32 @@ export const CLAUDE_DESKTOP_CONFIG_PATH = join(
 export const GLOBAL_CLAUDE_MD = join(CLAUDE_DIR, "CLAUDE.md");
 export const SKILLS_DIR = join(CLAUDE_DIR, "skills");
 
+export interface TranscriptPathInfo {
+  isSubagent: boolean;
+  parentAgentId: string | null;
+}
+
+/**
+ * Classify a transcript file path as a top-level session or a sub-agent
+ * transcript — WITHOUT ever mutating the path handed back to the filesystem.
+ *
+ * Sub-agent transcripts live at:
+ *   .../<parent-agent-id>/subagents/agent-<id>.jsonl
+ * so the directory segment immediately before "subagents" is the parent id.
+ *
+ * Separator matching happens on a COPY only: "\" is a legal filename character
+ * on POSIX, so rewriting it into the real path makes statSync miss every file
+ * on macOS/Linux (the exact bug this replaces). Normalizing every "\" to "/" on
+ * the copy classifies both POSIX ("/"-separated) and Windows
+ * ("C:\...\subagents\agent-x.jsonl") paths correctly.
+ */
+export function classifyTranscriptPath(realPath: string): TranscriptPathInfo {
+  const segments = realPath.replace(/\\/g, "/").split("/");
+  const subagentsIdx = segments.lastIndexOf("subagents");
+  if (subagentsIdx <= 0) return { isSubagent: false, parentAgentId: null };
+  return { isSubagent: true, parentAgentId: segments[subagentsIdx - 1] ?? null };
+}
+
 const SRC_DIR = import.meta.dir;
 export const APP_DIR = join(SRC_DIR, "..");
 export const DATA_DIR = join(APP_DIR, "data");
