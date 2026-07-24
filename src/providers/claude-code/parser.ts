@@ -4,7 +4,7 @@ import type { Database } from "bun:sqlite";
 import { extractTitle } from "./titles";
 import { getFileRecord, upsertFile, insertTurn, insertEvent, upsertAgent, addEventResultTokens } from "../../transcripts/cache";
 import type { FileRecord, AgentRecord } from "../../transcripts/cache";
-import { PROJECTS_DIR } from "../../paths";
+import { PROJECTS_DIR, classifyTranscriptPath } from "../../paths";
 import { resolveRunIdsForProvider, refreshRuns, recomputeAgentActivity } from "../../transcripts/runs";
 
 const PROVIDER_ID = "claude-code";
@@ -362,19 +362,10 @@ export function scanAll(db: Database): void {
   const rawFiles = findJsonlFiles(PROJECTS_DIR);
 
   for (const f of rawFiles) {
-    const normalized = f.replace(/\//g, "\\");
-    const isSubagent = normalized.includes("\\subagents\\");
-    let parentAgentId: string | null = null;
-
-    if (isSubagent) {
-      const parts = normalized.split("\\");
-      const subagentsIdx = parts.lastIndexOf("subagents");
-      if (subagentsIdx > 0) {
-        parentAgentId = parts[subagentsIdx - 1] ?? null;
-      }
-    }
-
-    parseFileIncremental(db, normalized, isSubagent, parentAgentId);
+    // Classify on a copy; hand parseFileIncremental the ORIGINAL path so
+    // statSync/openSync see the real file on every platform.
+    const { isSubagent, parentAgentId } = classifyTranscriptPath(f);
+    parseFileIncremental(db, f, isSubagent, parentAgentId);
   }
 
   recomputeDerived(db);

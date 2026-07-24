@@ -1,7 +1,7 @@
 import { existsSync, statSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { PROJECTS_DIR } from "../../paths";
+import { PROJECTS_DIR, classifyTranscriptPath } from "../../paths";
 import { parseFileIncremental, scanAll, recomputeDerived } from "./parser";
 import { loadAgentDetail } from "./agentDetail";
 import { loadAgentTree } from "./agentTree";
@@ -39,17 +39,10 @@ function scheduleRecompute(db: Database): void {
 }
 
 function ingestFile(db: Database, filePath: string): void {
-  const normalized = filePath.replace(/\//g, "\\");
-  const isSubagent = normalized.includes("\\subagents\\");
-  let parentSessionId: string | null = null;
-
-  if (isSubagent) {
-    const parts = normalized.split("\\");
-    const idx = parts.lastIndexOf("subagents");
-    if (idx > 0) parentSessionId = parts[idx - 1] ?? null;
-  }
-
-  parseFileIncremental(db, normalized, isSubagent, parentSessionId);
+  // Classify on a copy; parse the ORIGINAL path so the filesystem read
+  // succeeds on POSIX, where "\" is a legal filename character.
+  const { isSubagent, parentAgentId } = classifyTranscriptPath(filePath);
+  parseFileIncremental(db, filePath, isSubagent, parentAgentId);
   scheduleRecompute(db);
 }
 

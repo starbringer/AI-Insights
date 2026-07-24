@@ -12,7 +12,7 @@ Today it parses **Claude Code's JSONL transcripts**. The architecture is intenti
 ## Requirements
 
 - [Bun](https://bun.sh) ≥ 1.1 (tested on 1.3.13)
-- Windows (the browser-open command uses `cmd /c start`; other platforms work but won't auto-open)
+- **Windows, macOS, or Linux.** Transcript parsing and the dashboard are cross-platform. Only the auto-open-browser step is Windows-specific (it shells out to `cmd /c start`); on macOS/Linux the server runs the same, you just open the URL yourself.
 - At least one supported data source:
   - **Claude Code** with data in `~/.claude/projects/` *(currently the only built-in source)*
 
@@ -44,6 +44,7 @@ Environment variable `PORT` is also respected.
 bun run start        # same as bun run server.ts
 bun run dev          # hot-reload with --watch
 bun run typecheck    # tsc --noEmit (zero-error check)
+bun run test         # run the unit test suite (bun test)
 bun run build        # compile to dist/llm-usage.exe (Windows x64)
 ```
 
@@ -238,6 +239,8 @@ bun run build
 ```
 
 The compiled binary embeds the Bun runtime. Static files in `static/` must be distributed alongside it.
+
+The `build` script targets Windows x64. On macOS/Linux, run from source with `bun run server.ts`, or retarget the compile with `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/llm-usage`.
 
 ## License
 

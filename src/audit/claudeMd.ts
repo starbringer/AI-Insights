@@ -47,12 +47,15 @@ export function getClaudeMdAudit(db: Database, projectPaths: string[] = []): Cla
       `SELECT DISTINCT cwd FROM agents WHERE cwd IS NOT NULL`
     ).all().map(r => r.cwd);
   }
-  // Windows paths are case-insensitive; transcripts record the same project
-  // as both "G:\AI\x" and "g:\AI\x" — dedupe or files double-count.
+  // Windows paths are case-insensitive; transcripts can record the same project
+  // with different drive-letter/segment casing (e.g. "C:\Foo" vs "c:\Foo"), so
+  // case-fold there to dedupe. On case-sensitive filesystems (macOS/Linux) key
+  // verbatim, or two genuinely distinct project dirs differing only in case
+  // collapse into one and lose a CLAUDE.md from the audit.
   const seen = new Set<string>();
   for (const p of projects) {
     for (const candidate of [join(p, "CLAUDE.md"), join(p, ".claude", "CLAUDE.md")]) {
-      const key = candidate.toLowerCase();
+      const key = process.platform === "win32" ? candidate.toLowerCase() : candidate;
       if (seen.has(key)) continue;
       seen.add(key);
       const f = analyzeFile(candidate, `Project (${candidate})`);
