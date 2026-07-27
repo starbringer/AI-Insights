@@ -103,7 +103,7 @@ const insState = { files: [], selected: null, dirty: false };
 
 async function loadClaudeMdTab() {
   const root = document.getElementById('cfg-claudemd-root');
-  root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:200px"></div>';
   let report;
   try { report = await api(`/config/instructions${pq()}`); }
   catch (e) { return cfgError('cfg-claudemd-root', e); }
@@ -217,7 +217,7 @@ async function loadCommandsTab() {
   const root = document.getElementById('cfg-commands-root');
   // Keep the open command selected across the reload that follows a save/delete.
   const prevPath = cmdState.list[cmdState.selected]?.path ?? null;
-  root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:200px"></div>';
   try { cmdState.list = await api(`/config/commands${pq()}`); }
   catch (e) { return cfgError('cfg-commands-root', e); }
 
@@ -361,7 +361,7 @@ async function loadSkillsTab() {
   const root = document.getElementById('cfg-skills-root');
   // Keep the open skill selected across the reload that follows a save.
   const prevPath = skillState.list[skillState.selected]?.path ?? null;
-  root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:200px"></div>';
   try { skillState.list = await api(`/config/skills${pq()}`); }
   catch (e) { return cfgError('cfg-skills-root', e); }
 
@@ -445,7 +445,7 @@ const hookState = { entries: [], totalFires30d: 0, selected: -1, editable: false
 
 async function loadHooksTab() {
   const root = document.getElementById('cfg-hooks-root');
-  root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:200px"></div>';
   let report;
   try { report = await api(`/config/hooks${pq()}`); }
   catch (e) { return cfgError('cfg-hooks-root', e); }
@@ -571,7 +571,7 @@ const mcpState = { report: null, selected: -1 };
 
 async function loadMcpTab(refresh = false) {
   const root = document.getElementById('cfg-mcp-root');
-  root.innerHTML = '<div class="audit-card skeleton" style="height:240px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:240px"></div>';
   let d;
   try { d = await api(`/config/mcp${pq()}${refresh ? `${pq() ? '&' : '?'}refresh=1` : ''}`); }
   catch (e) { return cfgError('cfg-mcp-root', e); }
@@ -688,7 +688,7 @@ function renderMcpDetail(idx) {
 
 async function loadPermissionsTab() {
   const root = document.getElementById('cfg-permissions-root');
-  root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:200px"></div>';
   let projects = [];
   try { projects = await api(`/config/projects${pq()}`); } catch { /* user layer only */ }
 
@@ -714,7 +714,7 @@ async function loadPermissionsTab() {
 
 async function renderPermissions(project) {
   const body = document.getElementById('perm-body');
-  body.innerHTML = '<div class="audit-card skeleton" style="height:160px"></div>';
+  body.innerHTML = '<div class="skeleton-card skeleton" style="height:160px"></div>';
   let model;
   try {
     model = await api(`/config/permissions${pq()}${project ? `${pq() ? '&' : '?'}project=${encodeURIComponent(project)}` : ''}`);
@@ -755,7 +755,7 @@ const memState = { stores: [], selected: 0 };
 
 async function loadMemoryTab() {
   const root = document.getElementById('cfg-memory-root');
-  root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:200px"></div>';
   try { memState.stores = await api(`/config/memory${pq()}`); }
   catch (e) { return cfgError('cfg-memory-root', e); }
 
@@ -818,7 +818,7 @@ function renderMemoryTopics() {
 
 async function loadConfigsTab() {
   const root = document.getElementById('cfg-configs-root');
-  root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:200px"></div>';
   let projects = [];
   try { projects = await api(`/config/projects${pq()}`); } catch { /* user only */ }
 
@@ -844,7 +844,7 @@ async function loadConfigsTab() {
 
 async function renderEffectiveConfigs(project) {
   const body = document.getElementById('configs-body');
-  body.innerHTML = '<div class="audit-card skeleton" style="height:160px"></div>';
+  body.innerHTML = '<div class="skeleton-card skeleton" style="height:160px"></div>';
   let model, recentModels = [];
   try {
     model = await api(`/config/effective${pq()}${project ? `${pq() ? '&' : '?'}project=${encodeURIComponent(project)}` : ''}`);
@@ -920,7 +920,7 @@ const graphState = { data: null, selected: -1 };
 
 async function loadWorkflowTab() {
   const root = document.getElementById('cfg-workflow-root');
-  root.innerHTML = '<div class="audit-card skeleton" style="height:280px"></div>';
+  root.innerHTML = '<div class="skeleton-card skeleton" style="height:280px"></div>';
   let g;
   try { g = await api(`/config/dependencies${pq()}`); }
   catch (e) { return cfgError('cfg-workflow-root', e); }

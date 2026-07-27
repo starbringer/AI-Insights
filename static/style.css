@@ -421,7 +421,7 @@ body {
    Chart cards
    ================================================================= */
 .chart-card,
-.audit-card,
+.skeleton-card,
 .settings-card {
   background: var(--surface);
   border-radius: var(--r-card);
@@ -445,19 +445,8 @@ body {
 @media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
 
 /* =================================================================
-   Audit grid
+   Status badges
    ================================================================= */
-.audit-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
-  gap: 18px;
-}
-.audit-card { display: flex; flex-direction: column; gap: 11px; }
-.audit-card-header { display: flex; align-items: center; gap: 9px; }
-.audit-card-title { font-size: 13.5px; font-weight: 700; flex: 1; }
-.audit-card-headline { font-size: 12px; color: var(--text-dim); }
-.audit-chart { flex-shrink: 0; }
-
 .status-ok, .status-warn, .status-error {
   width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -468,24 +457,6 @@ body {
 .status-ok    { color: var(--c-green); }
 .status-warn  { color: var(--c-amber); }
 .status-error { color: var(--c-red); }
-
-details.audit-fix {
-  margin-top: 2px;
-  padding-top: 11px;
-  border-top: 1px solid var(--border);
-}
-details.audit-fix summary {
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  user-select: none;
-  list-style: none;
-}
-details.audit-fix summary::-webkit-details-marker { display: none; }
-details.audit-fix summary::before { content: "▸ "; }
-details.audit-fix[open] summary::before { content: "▾ "; }
-details.audit-fix ul { margin: 9px 0 0 16px; font-size: 12px; color: var(--text-dim); line-height: 1.85; }
 
 .copy-btn {
   background: var(--surface);
@@ -862,7 +833,6 @@ tbody tr:hover td { background: var(--accent-soft); }
    Responsive
    ================================================================= */
 @media (max-width: 1240px) {
-  .audit-grid { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr; }
 }
 
@@ -1143,7 +1113,7 @@ tbody tr:hover td { background: var(--accent-soft); }
 }
 
 /* =================================================================
-   Audit — MCP server table with expandable tool/schema details
+   MCP server table with expandable tool/schema details
    ================================================================= */
 .mcp-server-row.expandable { cursor: pointer; }
 .mcp-server-row.expandable:hover td { color: var(--text); }

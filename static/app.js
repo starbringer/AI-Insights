@@ -678,7 +678,7 @@ function renderRunsTable(rows, total) {
 
 async function loadSettings() {
   try {
-    const [thresholds, pricing] = await Promise.all([api('/audit/thresholds'), api('/audit/pricing')]);
+    const [thresholds, pricing] = await Promise.all([api('/settings/thresholds'), api('/settings/pricing')]);
     renderThresholds(thresholds);
     renderPricing(pricing);
   } catch (e) {
@@ -728,7 +728,7 @@ function startEditThreshold(el) {
     const val = parseFloat(input.value);
     if (!isNaN(val) && key) {
       try {
-        await apiPut('/audit/thresholds', { [key]: val });
+        await apiPut('/settings/thresholds', { [key]: val });
         toast('Threshold saved');
       } catch { toast('Save failed'); }
     }

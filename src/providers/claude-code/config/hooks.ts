@@ -72,8 +72,8 @@ function collectFromFile(path: string, level: ConfigScope, projectDir: string | 
 }
 
 /**
- * Recorded fire counts (30d) per entry, from the transcript event stream —
- * the same attribution rules the audit card uses:
+ * Recorded fire counts (30d) per entry, from the transcript event stream.
+ * Attribution rules:
  *   UserPromptSubmit → real prompts; SessionStart → agents started;
  *   Stop/SubagentStop → logged stop-hook fires; Pre/PostToolUse → tool calls
  *   matched against the entry's matcher; PreCompact → compactions.

@@ -257,7 +257,8 @@ hook → MCP → skill → command 排序的连通分量 —— 选中其一即�
 
 ### Settings（设置）
 
-审计 API 使用的告警阈值，以及驱动应用内全部成本数字的分模型参考价格。
+Harness 标签页上 ok/warn/error 状态标记所用的告警阈值，以及驱动应用内全部成本数字的
+分模型参考价格。
 
 ![Settings](docs/screenshots/16-settings.png)
 
@@ -308,6 +309,7 @@ src/
         commands.ts        三来源命令扫描、命名空间、增删改
         skills.ts          三来源 skill 扫描、触发分析、实际使用记录
         hooks.ts           跨配置层的 hook、脚本解析、触发次数
+        mcp.ts             从配置文件枚举 MCP + 工具/schema 探测 + 诊断
         permissions.ts     规则解析 + 层合并 + 覆盖标记
         memory.ts          按项目的记忆库（MEMORY.md 索引 + 主题）
         effective.ts       合并后的设置层 + 层限制告警
@@ -320,17 +322,9 @@ src/
     aggregate.ts           SQL 聚合查询（总量、序列、智能体、模型、项目）
     runs.ts                run id 解析、活跃度重算、运行列表/加载
     usageReport.ts         单次运行的用量拆解（分类桶、分模型成本、建议）
-  audit/
-    claudeMd.ts            CLAUDE.md 体积审计
-    hooks.ts               settings.json hook 审计
-    mcp.ts                 MCP 枚举 + 工具/schema 探测 + 诊断
-    plugins.ts             插件列表审计
-    skills.ts              skill 目录审计
-    settings.ts            模型与权限审计
-    index.ts               调度器，带 60 秒缓存
   watcher.ts               chokidar 监听器 → 把变更派发给所属 provider
   api/
-    auditEndpoints.ts      审计报告、阈值、价格
+    settingsEndpoints.ts   阈值（读写）+ 价格（只读）
     transcriptEndpoints.ts 用量数据：统计、时间序列、运行、智能体、树、用量报告
     configEndpoints.ts     /api/config/* —— Harness 标签页
     providersEndpoint.ts   GET /api/providers

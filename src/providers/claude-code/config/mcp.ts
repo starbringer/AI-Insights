@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { countTokensInObject } from "../tokenizer";
-import { getThresholds, statusForValue, type Status } from "../thresholds";
-import { CLAUDE_JSON_PATH } from "../paths";
+import { countTokensInObject } from "../../../tokenizer";
+import { getThresholds, statusForValue, type Status } from "../../../thresholds";
+import { CLAUDE_JSON_PATH } from "../../../paths";
+import type { McpToolInfo, McpServerInfo, McpReport } from "../../../config/types";
 
 // ============================================================================
-// MCP audit — enumerates servers from Claude Code's CONFIG FILES, never from
+// MCP report — enumerates servers from Claude Code's CONFIG FILES, never from
 // `claude mcp list`. The CLI health-checks every server before printing (slow,
 // network-dependent, can exceed any spawn timeout with empty stdout) and its
 // human-readable output format drifts across versions — both failure modes
@@ -20,34 +21,6 @@ import { CLAUDE_JSON_PATH } from "../paths";
 // HTTP), and every enumeration or probe failure is reported in `diagnostics`
 // instead of being swallowed.
 // ============================================================================
-
-export interface McpToolInfo {
-  name: string;
-  description: string;
-  tokens: number;
-  inputSchema: unknown;
-}
-
-export interface McpServer {
-  name: string;
-  scope: "user" | "claude.ai" | "local" | "project" | "unknown";
-  type: "stdio" | "http" | "sse";
-  command?: string;
-  source: string;          // config file (or origin) the definition came from
-  project?: string;        // project dir, for local/project scopes
-  toolCount: number;
-  schemaTokens: number;
-  tools: McpToolInfo[];
-  probeError?: string;     // why tools could not be listed, when they couldn't
-}
-
-export interface McpAudit {
-  status: Status;
-  servers: McpServer[];
-  totalTools: number;
-  totalSchemaTokens: number;
-  diagnostics: string[];
-}
 
 interface McpServerDef {
   type?: string;
@@ -185,11 +158,11 @@ async function probeHttp(def: McpServerDef): Promise<ProbeResult> {
 
 // Probes spawn processes / hit the network, so cache results per server
 // DEFINITION — a config change gets a fresh probe, an unchanged one reuses the
-// last result until the TTL lapses. A forced audit refresh re-probes everything.
+// last result until the TTL lapses. A forced refresh re-probes everything.
 const PROBE_TTL = 10 * 60_000;
 const probeCache = new Map<string, { ts: number; result: ProbeResult }>();
 
-async function probeServer(name: string, def: McpServerDef, type: McpServer["type"], forceRefresh: boolean): Promise<ProbeResult> {
+async function probeServer(name: string, def: McpServerDef, type: McpServerInfo["type"], forceRefresh: boolean): Promise<ProbeResult> {
   const key = `${name}:${JSON.stringify(def)}`;
   const cached = probeCache.get(key);
   if (cached && !forceRefresh && Date.now() - cached.ts < PROBE_TTL) return cached.result;
@@ -199,7 +172,7 @@ async function probeServer(name: string, def: McpServerDef, type: McpServer["typ
   return result;
 }
 
-function defType(def: McpServerDef): McpServer["type"] {
+function defType(def: McpServerDef): McpServerInfo["type"] {
   if (def.type === "http" || (!def.type && def.url)) return "http";
   if (def.type === "sse") return "sse";
   return "stdio";
@@ -213,7 +186,7 @@ function defDisplayCommand(def: McpServerDef): string {
 interface EnumeratedServer {
   name: string;
   def: McpServerDef | null; // null → definition not available locally (claude.ai)
-  scope: McpServer["scope"];
+  scope: McpServerInfo["scope"];
   source: string;
   project?: string;
   noProbeReason?: string;   // set → listed but never probed (consent / no local def)
@@ -292,12 +265,12 @@ function enumerateServers(diagnostics: string[]): EnumeratedServer[] {
   return found;
 }
 
-export async function getMcpAudit(forceRefresh = false): Promise<McpAudit> {
+export async function getMcpReport(forceRefresh = false): Promise<McpReport> {
   const t = getThresholds();
   const diagnostics: string[] = [];
   const enumerated = enumerateServers(diagnostics);
 
-  const servers: McpServer[] = await Promise.all(enumerated.map(async e => {
+  const servers: McpServerInfo[] = await Promise.all(enumerated.map(async e => {
     if (!e.def) {
       return {
         name: e.name, scope: e.scope, type: "http" as const, source: e.source,
@@ -332,7 +305,7 @@ export async function getMcpAudit(forceRefresh = false): Promise<McpAudit> {
       diagnostics.push(`probe of "${s.name}" (${s.type}): ${s.probeError}`);
     }
   }
-  if (diagnostics.length) console.warn("[audit:mcp]", diagnostics.join(" | "));
+  if (diagnostics.length) console.warn("[mcp]", diagnostics.join(" | "));
 
   const totalTools = servers.reduce((s, srv) => s + srv.toolCount, 0);
   const totalSchemaTokens = servers.reduce((s, srv) => s + srv.schemaTokens, 0);

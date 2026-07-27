@@ -121,7 +121,7 @@ function initSchema(db: Database): void {
 
   // Lightweight event stream extracted from transcripts: real user prompts,
   // tool calls, hook fires, API errors, compactions, model fallbacks.
-  // Powers the audit page with recorded counts instead of guesses.
+  // Powers the Harness tabs with recorded counts instead of guesses.
   db.run(`CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     provider    TEXT NOT NULL,

@@ -69,11 +69,9 @@ Routes marked *ranged* accept `?range=1h\|24h\|7d\|30d`. Bucket size adapts:
 Write routes only accept paths the matching list endpoint enumerated — see
 [architecture › write safety](architecture.md#write-safety).
 
-## Audit and settings
+## Settings
 
 | Route | Description |
 |---|---|
-| `GET /api/audit` | Machine-readable configuration findings (the audit *page* was folded into the Dashboard and Harness tabs; this endpoint remains) |
-| `POST /api/audit/refresh` | Force a re-audit, bypassing the 60s cache |
-| `GET /api/audit/thresholds` · `PUT /api/audit/thresholds` | Warning/error thresholds used by the audit |
-| `GET /api/audit/pricing` · `PUT /api/audit/pricing` | Per-model reference pricing |
+| `GET /api/settings/thresholds` · `PUT /api/settings/thresholds` | Warning/error thresholds behind the ok/warn/error badges on the Harness tabs. `PUT` merges the keys you send and persists to `data/thresholds.json` |
+| `GET /api/settings/pricing` | Per-model reference pricing that drives every cost number. Read-only over HTTP — edit `data/pricing.json` to change it |

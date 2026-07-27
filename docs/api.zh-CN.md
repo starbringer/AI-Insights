@@ -67,11 +67,9 @@ provider）。
 写入类路由只接受对应列表接口枚举过的路径 —— 见
 [架构 › 写入安全](architecture.zh-CN.md#写入安全)。
 
-## 审计与设置
+## 设置
 
 | 路由 | 说明 |
 |---|---|
-| `GET /api/audit` | 机器可读的配置检查结果（审计*页面*已并入 Dashboard 与 Harness 标签页，但该接口保留） |
-| `POST /api/audit/refresh` | 强制重新审计，绕过 60 秒缓存 |
-| `GET /api/audit/thresholds` · `PUT /api/audit/thresholds` | 审计使用的告警/错误阈值 |
-| `GET /api/audit/pricing` · `PUT /api/audit/pricing` | 分模型参考价格 |
+| `GET /api/settings/thresholds` · `PUT /api/settings/thresholds` | Harness 标签页上 ok/warn/error 状态标记所用的告警/错误阈值。`PUT` 只合并你传入的键，并写入 `data/thresholds.json` |
+| `GET /api/settings/pricing` | 驱动应用内全部成本数字的分模型参考价格。HTTP 接口只读 —— 如需修改请编辑 `data/pricing.json` |
