@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { mkdirSync } from "node:fs";
-import { DATA_DIR } from "./src/paths";
+import { relative } from "node:path";
+import { DATA_DIR, STATIC_DIR } from "./src/paths";
 import { getDb } from "./src/db";
 import { PROVIDERS } from "./src/providers";
 import { startWatcher } from "./src/watcher";
@@ -32,8 +33,13 @@ console.log("[startup] done scanning");
 if (!STATIC_ONLY) startWatcher(db);
 
 if (!NO_BROWSER && !STATIC_ONLY) {
-  // Windows: use cmd /c start; fall back to explorer
-  Bun.spawn(["cmd", "/c", `start http://localhost:${PORT}`], { stderr: "ignore" });
+  const url = `http://localhost:${PORT}`;
+  // Pick the platform's opener; stderr is ignored so a missing one never crashes us.
+  const openCmd =
+    process.platform === "darwin" ? ["open", url]
+    : process.platform === "win32" ? ["cmd", "/c", "start", "", url]
+    : ["xdg-open", url];
+  Bun.spawn(openCmd, { stderr: "ignore" });
 }
 
 const app = new Hono();
@@ -43,7 +49,14 @@ app.route("/api/providers", providersRouter);
 app.route("/api/config",    configRouter);
 app.route("/api",           transcriptRouter);
 
-app.use("/*", serveStatic({ root: "./static" }));
+// hono's serveStatic root is resolved against the CWD, so a bare "./static"
+// 404s the whole UI whenever the app is started from anywhere but its own
+// directory. Point it at the real static dir — as a CWD-RELATIVE path, because
+// hono strips the leading "/" off an absolute root and would turn it back into
+// a relative one on macOS/Linux. Separators are forward slashes for the same
+// reason: hono builds the path by string concatenation, not path.join.
+const STATIC_ROOT = (relative(process.cwd(), STATIC_DIR) || ".").replace(/\\/g, "/");
+app.use("/*", serveStatic({ root: STATIC_ROOT }));
 
 console.log(`AI Insights → http://localhost:${PORT}`);
 

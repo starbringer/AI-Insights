@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { classifyTranscriptPath } from "./paths";
+import { classifyTranscriptPath, pathKey, APP_DIR, DATA_DIR, STATIC_DIR } from "./paths";
+import { isAbsolute } from "node:path";
 
 // classifyTranscriptPath must classify BOTH separator styles without ever
 // depending on the host platform — the whole point is that the same code runs
@@ -34,4 +35,37 @@ test("a POSIX filename containing a backslash is not mistaken for a subagent", (
 test("nested 'subagents' segments take the deepest one as parent", () => {
   expect(classifyTranscriptPath("/p/subagents/a/parent-9/subagents/agent-x.jsonl"))
     .toEqual({ isSubagent: true, parentAgentId: "parent-9" });
+});
+
+// pathKey decides whether two spellings of a path are "the same directory".
+// Windows filesystems are case-insensitive, so folding there collapses real
+// duplicates; folding elsewhere would merge directories that genuinely differ.
+
+test("pathKey collapses case only on Windows", () => {
+  const a = pathKey("C:\\Users\\Me\\Proj");
+  const b = pathKey("c:\\users\\me\\proj");
+  if (process.platform === "win32") expect(a).toBe(b);
+  else expect(a).not.toBe(b);
+});
+
+test("pathKey is idempotent", () => {
+  const p = "/home/me/Proj";
+  expect(pathKey(pathKey(p))).toBe(pathKey(p));
+});
+
+// APP_DIR anchors data/ and static/. Running from source it is the repo root;
+// inside a compiled binary it falls back to the executable's directory. Either
+// way it must be a real absolute path — resolving to the filesystem root meant
+// the first mkdir of data/ died with EPERM/EACCES.
+
+test("APP_DIR resolves to a real absolute directory, never the filesystem root", () => {
+  expect(isAbsolute(APP_DIR)).toBe(true);
+  expect(APP_DIR.replace(/[\\/]+$/, "")).not.toBe("");
+  expect(APP_DIR).not.toMatch(/^[\\/]$/);
+  expect(APP_DIR).not.toMatch(/^[A-Za-z]:[\\/]?$/);
+});
+
+test("DATA_DIR and STATIC_DIR sit under APP_DIR", () => {
+  expect(DATA_DIR.startsWith(APP_DIR)).toBe(true);
+  expect(STATIC_DIR.startsWith(APP_DIR)).toBe(true);
 });
