@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { McpAudit } from "../audit/mcp";
+import type { Status } from "../thresholds";
 
 // ============================================================================
 // Provider-agnostic configuration-inspection layer.
@@ -141,6 +141,36 @@ export interface PermissionModelInfo {
   effective: PermissionRuleInfo[];
 }
 
+// ---- MCP servers ---------------------------------------------------------------
+
+export interface McpToolInfo {
+  name: string;
+  description: string;
+  tokens: number;
+  inputSchema: unknown;
+}
+
+export interface McpServerInfo {
+  name: string;
+  scope: "user" | "claude.ai" | "local" | "project" | "unknown";
+  type: "stdio" | "http" | "sse";
+  command?: string;
+  source: string;             // config file (or origin) the definition came from
+  project?: string;           // project dir, for local/project scopes
+  toolCount: number;
+  schemaTokens: number;
+  tools: McpToolInfo[];
+  probeError?: string;        // why tools could not be listed, when they couldn't
+}
+
+export interface McpReport {
+  status: Status;
+  servers: McpServerInfo[];
+  totalTools: number;
+  totalSchemaTokens: number;
+  diagnostics: string[];      // enumeration/probe failures, never swallowed
+}
+
 // ---- Memory -------------------------------------------------------------------
 
 export interface MemoryTopicInfo {
@@ -261,7 +291,7 @@ export interface ToolConfigAdapter {
   listProjects?(db: Database): string[];
   permissionModel?(db: Database, projectDir?: string): PermissionModelInfo;
 
-  mcpReport?(db: Database, forceRefresh?: boolean): Promise<McpAudit & { agents30d: number }>;
+  mcpReport?(db: Database, forceRefresh?: boolean): Promise<McpReport & { agents30d: number }>;
 
   listMemoryStores?(db: Database): MemoryStoreInfo[];
 

@@ -278,8 +278,8 @@ it overrides, and warnings for keys set in a layer the tool never reads.
 
 ### Settings
 
-Warning thresholds used by the audit API, and the per-model reference pricing that
-drives every cost number in the app.
+Warning thresholds behind the ok/warn/error badges on the Harness tabs, and the
+per-model reference pricing that drives every cost number in the app.
 
 ![Settings](docs/screenshots/16-settings.png)
 
@@ -331,6 +331,7 @@ src/
         commands.ts        Three-source command scan, namespacing, create/edit/delete
         skills.ts          Three-source skill scan, trigger analysis, recorded usage
         hooks.ts           Hooks across settings layers, script resolution, fire counts
+        mcp.ts             MCP enumeration from config files + tool/schema probes + diagnostics
         permissions.ts     Rule parsing + layer merge + override marking
         memory.ts          Per-project memory stores (MEMORY.md index + topics)
         effective.ts       Merged settings layers with layer-restriction warnings
@@ -343,17 +344,9 @@ src/
     aggregate.ts           SQL aggregation queries (totals, series, agents, models, projects)
     runs.ts                Run-id resolution, activity recompute, run listing/loading
     usageReport.ts         Per-run usage breakdown (buckets, per-model costs, advice)
-  audit/
-    claudeMd.ts            CLAUDE.md size audit
-    hooks.ts               Settings.json hooks audit
-    mcp.ts                 MCP enumeration + tool/schema probes + diagnostics
-    plugins.ts             Plugin list audit
-    skills.ts              Skills directory audit
-    settings.ts            Model + permissions audit
-    index.ts               Orchestrator with 60s cache
   watcher.ts               chokidar watcher → dispatches changes to the owning provider
   api/
-    auditEndpoints.ts      Audit report, thresholds, pricing
+    settingsEndpoints.ts   Thresholds (read/write) + pricing (read)
     transcriptEndpoints.ts Usage data: stats, timeseries, runs, agents, trees, usage reports
     configEndpoints.ts     /api/config/* — the Harness tabs
     providersEndpoint.ts   GET /api/providers

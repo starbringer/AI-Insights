@@ -1,10 +1,10 @@
 import type { Database } from "bun:sqlite";
 import type { ToolConfigAdapter } from "../../../config/types";
-import { getMcpAudit } from "../../../audit/mcp";
 import { getInstructionsReport, readInstructionFile, writeInstructionFile } from "./instructions";
 import { listCommands, writeCommandFile, createCommand, deleteCommand } from "./commands";
 import { listSkills, writeSkillFile } from "./skills";
 import { listHooks, readHookScript, writeHookScript, deleteHook } from "./hooks";
+import { getMcpReport } from "./mcp";
 import { getPermissionModel } from "./permissions";
 import { listMemoryStores } from "./memory";
 import { getEffectiveConfig } from "./effective";
@@ -52,11 +52,11 @@ export const claudeCodeConfigAdapter: ToolConfigAdapter = {
   permissionModel: getPermissionModel,
 
   mcpReport: async (db: Database, forceRefresh = false) => {
-    const audit = await getMcpAudit(forceRefresh);
+    const report = await getMcpReport(forceRefresh);
     const agents30d = db.query<{ n: number }, []>(
       `SELECT COUNT(DISTINCT agent_id) as n FROM turns WHERE ts >= date('now','-30 days')`
     ).get()?.n ?? 0;
-    return { ...audit, agents30d };
+    return { ...report, agents30d };
   },
 
   listMemoryStores,
