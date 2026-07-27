@@ -1,9 +1,11 @@
-# LLM Usage Monitor
+# AI Insights
+
+**English** | [简体中文](README.zh-CN.md)
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-yellow)](https://buymeacoffee.com/starbringer)
 
-A local web app that turns raw LLM usage data into a live dashboard — token counts, costs, session history, and configuration health.
+Understand and improve how you use AI coding tools. A local web app that turns raw usage data into a live dashboard — token counts, costs, session history, and configuration health.
 
 Today it parses **Claude Code's JSONL transcripts**. The architecture is provider-agnostic, so other sources can be plugged in over time.
 
@@ -36,8 +38,8 @@ Check it: `bun --version`
 ### 2. Get the code
 
 ```bash
-git clone https://github.com/starbringer/llm-usage.git
-cd llm-usage
+git clone https://github.com/starbringer/ai-insights.git
+cd ai-insights
 ```
 
 ### 3. Install dependencies
@@ -86,7 +88,7 @@ bun run start        # start the server (same as bun run server.ts)
 bun run dev          # hot-reload with --watch
 bun run typecheck    # tsc --noEmit
 bun run test         # unit test suite
-bun run build        # compile to dist/llm-usage.exe (Windows x64)
+bun run build        # compile to dist/ai-insights.exe (Windows x64)
 ```
 
 ### Rebuilding the cache
@@ -98,12 +100,12 @@ itself whenever the schema version changes after an update.
 ### Standalone executable
 
 ```bash
-bun run build        # → dist/llm-usage.exe (~60MB, no Bun install needed)
+bun run build        # → dist/ai-insights.exe (~60MB, no Bun install needed)
 ```
 
 The binary embeds the Bun runtime; ship the `static/` folder alongside it. The
 `build` script targets Windows x64 — on macOS/Linux either run from source or
-retarget: `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/llm-usage`.
+retarget: `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/ai-insights`.
 
 ---
 
@@ -120,13 +122,13 @@ rate, active runs) over a token trend chart split into input, output, cache writ
 and cache read.
 
 Below it: usage by model, top projects, **MCP token usage** (tokens flowing through
-each server's tool calls, with a per-tool tooltip), **skill token usage**, the daily
-**cache hit rate** with a 50% guide line, the 30-day **model mix**, and **top 10 runs**
+each server's tool calls, with a per-tool tooltip), **skill token usage**, the
+**cache hit rate** with a 50% guide line, the **model mix**, and **top 10 runs**
 — click any bar to jump straight into that run.
 
 ![Dashboard charts](docs/screenshots/02-dashboard-charts.png)
 
-Every token chart has its own range switcher — `1h` / `24h` / `7d` / `30d` — and
+Every chart has its own range switcher — `1h` / `24h` / `7d` / `30d` — and
 remembers your choice. Costs are API-equivalent reference numbers from an editable
 pricing table, not billing; [details](docs/data-model.md#cost-estimation).
 
@@ -182,6 +184,9 @@ The **Harness** group inspects — and where safe, edits — the configuration o
 active tool. Each tab appears only if the active provider supports that capability,
 so a future adapter for another tool simply shows fewer tabs.
 
+Most of these tabs share one layout: a list column and a detail column beside it,
+each scrolling on its own.
+
 #### CLAUDE.md
 
 Every instruction file the tool injects: the global `~/.claude/CLAUDE.md` plus
@@ -202,7 +207,7 @@ Edit, create and delete user/project commands; plugin commands are read-only.
 
 #### Skills
 
-A narrow list on the left, full detail on the right: override detection, SKILL.md
+A narrow list, full detail beside it: override detection, SKILL.md
 token cost, `references/` and `scripts/` listings, **recorded** invocations and
 injected tokens over 30 days, and a **trigger analyzer** showing which prompt
 keywords would activate the skill.

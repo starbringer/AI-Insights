@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "llm-usage",
+      "name": "ai-insights",
       "dependencies": {
         "chokidar": "^4.0.0",
         "hono": "^4.6.0",

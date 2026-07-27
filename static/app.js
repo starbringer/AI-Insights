@@ -290,6 +290,8 @@ const CHART_LOADERS = {
   projects: async r => renderProjectsChart(await api(`/projects?range=${r}`)),
   mcp:      async r => renderMcpUsageChart(await api(`/mcp-usage?range=${r}`)),
   skills:   async r => renderSkillUsageChart(await api(`/skill-usage?range=${r}`)),
+  cacheHit: async r => renderCacheHitChart(await api(`/timeseries?range=${r}`)),
+  modelMix: async r => renderModelMixChart(await api(`/models?range=${r}`)),
   topRuns:  async r => renderTopRunsChart(await api(`/top-runs?limit=10&range=${r}`)),
 };
 
@@ -315,8 +317,6 @@ async function loadDashboard() {
   const jobs = [
     ['stats', async () => renderKpiCards(await api('/stats'))],
     ...Object.entries(CHART_LOADERS).map(([key, load]) => [key, () => load(chartRange(key))]),
-    ['cacheHit', async () => renderCacheHitChart(await api('/timeseries?days=30'))],
-    ['modelMix', async () => renderModelMixChart(await api('/models?range=30d'))],
   ];
 
   // allSettled so a single missing endpoint (e.g. server not restarted after
@@ -551,18 +551,20 @@ function renderTopRunsChart(runs) {
   });
 }
 
-// Daily cache-hit-rate line over the last 30 days, with the 50% guide line.
+// Cache-hit-rate line over the selected range, with the 50% guide line.
+// Buckets follow the range: 5-minute slices for 1h, hours for 24h, days beyond.
 function renderCacheHitChart(series) {
   const chart = initChart('chart-cache-hit');
   if (!chart) return;
-  if (!series?.length) return renderChartEmpty(chart, 'No usage in the last 30 days');
+  if (!series?.length) return renderChartEmpty(chart, 'No usage in this range');
   const rates = series.map(d => {
     const cr = d.cacheRead ?? 0;
     const total = (d.input ?? 0) + (d.cacheCreate5m ?? 0) + (d.cacheCreate1h ?? 0) + cr;
     return total ? +(cr / total * 100).toFixed(1) : 0;
   });
   chart.setOption({ ...baseOption(),
-    grid: { left: 8, right: 14, top: 16, bottom: 8, containLabel: true },
+    // right gutter leaves room for the 50% guide-line label at the end of the line
+    grid: { left: 8, right: 38, top: 16, bottom: 8, containLabel: true },
     xAxis: { type: 'category', data: series.map(d => d.date), axisLabel: { color: COLOR.dim } },
     yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: v => `${v}%`, color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
     series: [{
@@ -575,11 +577,11 @@ function renderCacheHitChart(series) {
   });
 }
 
-// Total tokens per model over the last 30 days — horizontal bars, largest on top.
+// Total tokens per model over the selected range — horizontal bars, largest on top.
 function renderModelMixChart(models) {
   const chart = initChart('chart-model-mix');
   if (!chart) return;
-  if (!models?.length) return renderChartEmpty(chart, 'No usage in the last 30 days');
+  if (!models?.length) return renderChartEmpty(chart, 'No usage in this range');
   const palette = [COLOR.blue, COLOR.orange, COLOR.purple, COLOR.green, COLOR.yellow];
   const rows = [...models].reverse();
   const names = rows.map(m => m.model.replace('claude-', '').replace(/-(\d)/g, ' $1'));

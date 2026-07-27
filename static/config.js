@@ -128,14 +128,16 @@ async function loadClaudeMdTab() {
     </div>
     <div class="cfg-split">
       <aside class="cfg-list" id="ins-file-list"></aside>
-      <div class="cfg-editor-card">
-        <div class="cfg-editor-head">
-          <code id="ins-editor-path" class="cfg-editor-path text-dim">select a file</code>
-          <span id="ins-dirty" class="cfg-dirty" title="This file has unsaved edits" hidden>unsaved</span>
-          <button id="ins-save" class="btn btn-accent" disabled>Save</button>
+      <div id="ins-detail">
+        <div class="cfg-editor-card">
+          <div class="cfg-editor-head">
+            <code id="ins-editor-path" class="cfg-editor-path text-dim">select a file</code>
+            <span id="ins-dirty" class="cfg-dirty" title="This file has unsaved edits" hidden>unsaved</span>
+            <button id="ins-save" class="btn btn-accent" disabled>Save</button>
+          </div>
+          <textarea id="ins-editor" class="cfg-editor" spellcheck="false"
+            placeholder="Select an instruction file in the list. Files marked 'not created' are created on first save."></textarea>
         </div>
-        <textarea id="ins-editor" class="cfg-editor" spellcheck="false"
-          placeholder="Select an instruction file on the left. Files marked 'not created' are created on first save."></textarea>
       </div>
     </div>`;
 
@@ -209,14 +211,17 @@ async function saveInstructionFile() {
 
 // ===== Commands =====
 
-const cmdState = { list: [], search: '' };
+const cmdState = { list: [], search: '', selected: -1 };
 
 async function loadCommandsTab() {
   const root = document.getElementById('cfg-commands-root');
+  // Keep the open command selected across the reload that follows a save/delete.
+  const prevPath = cmdState.list[cmdState.selected]?.path ?? null;
   root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
   try { cmdState.list = await api(`/config/commands${pq()}`); }
   catch (e) { return cfgError('cfg-commands-root', e); }
 
+  cmdState.selected = prevPath ? cmdState.list.findIndex(c => c.path === prevPath) : -1;
   root.innerHTML = `
     <div class="controls-row">
       <input type="text" id="cmd-search" class="input-sm" placeholder="Search commands…" value="${esc(cmdState.search)}">
@@ -225,43 +230,47 @@ async function loadCommandsTab() {
       <button id="cmd-new" class="btn">+ New command</button>
     </div>
     <div id="cmd-new-form" class="cfg-editor-card" hidden></div>
-    <div id="cmd-table"></div>
-    <div id="cmd-detail"></div>`;
+    <div class="cfg-split">
+      <aside class="cfg-list" id="cmd-list"></aside>
+      <div id="cmd-detail"><div class="cfg-placeholder text-dim">← Select a command to view or edit it</div></div>
+    </div>`;
 
   document.getElementById('cmd-search').addEventListener('input', e => {
     cmdState.search = e.target.value;
-    renderCommandTable();
+    renderCommandList();
   });
   document.getElementById('cmd-new').addEventListener('click', showNewCommandForm);
-  renderCommandTable();
+  renderCommandList();
+  if (cmdState.selected >= 0) renderCommandDetail(cmdState.selected);
 }
 
-function renderCommandTable() {
+function renderCommandList() {
   const q = cmdState.search.trim().toLowerCase();
   const rows = cmdState.list.filter(c =>
     !q || c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q));
   document.getElementById('cmd-count').textContent =
     `${rows.length} of ${cmdState.list.length} command${cmdState.list.length !== 1 ? 's' : ''}`;
-  const el = document.getElementById('cmd-table');
-  if (!rows.length) { el.innerHTML = '<p class="text-dim" style="padding:16px 0">No commands found.</p>'; return; }
-  el.innerHTML = `<table>
-    <thead><tr><th>Command</th><th>Source</th><th>Description</th><th>Args</th>
-      <th class="td-num">Tokens</th></tr></thead>
-    <tbody>${rows.map(c => {
-      const idx = cmdState.list.indexOf(c);
-      const dim = c.overriddenBy ? ' style="opacity:.45"' : '';
-      const overridden = c.overriddenBy ? ` <span class="cfg-badge cfg-badge-plain" title="A same-named definition with higher priority wins: ${esc(c.overriddenBy)}">overridden</span>` : '';
-      return `<tr class="cfg-row" data-idx="${idx}"${dim}>
-        <td><code>/${esc(c.invokeName)}</code>${overridden}</td>
-        <td>${scopeBadge(c.source, c.source === 'plugin' ? `${c.pluginName}@${c.marketplace}` : c.projectDir ?? '')}</td>
-        <td class="td-dim" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-            title="${esc(c.description)}">${esc(c.description || '—')}</td>
-        <td class="td-dim">${esc(c.argumentHint ?? (c.usesArguments ? '$ARGUMENTS' : '—'))}</td>
-        <td class="td-num td-dim">${fmt.tokens(c.tokens)}</td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
-  el.querySelectorAll('.cfg-row').forEach(row => {
-    row.addEventListener('click', () => renderCommandDetail(Number(row.dataset.idx)));
+  const el = document.getElementById('cmd-list');
+  if (!rows.length) { el.innerHTML = '<p class="text-dim" style="padding:16px 4px">No commands found.</p>'; return; }
+  el.innerHTML = rows.map(c => {
+    const idx = cmdState.list.indexOf(c);
+    const dim = c.overriddenBy ? ' style="opacity:.45"' : '';
+    const overridden = c.overriddenBy ? ` <span class="cfg-badge cfg-badge-plain" title="A same-named definition with higher priority wins: ${esc(c.overriddenBy)}">overridden</span>` : '';
+    return `<div class="cfg-list-item ${idx === cmdState.selected ? 'active' : ''}" data-idx="${idx}"${dim}
+      title="${esc(c.description || c.name)}">
+      <div class="cfg-list-title"><code>/${esc(c.invokeName)}</code>${overridden}</div>
+      <div class="cfg-list-meta">
+        ${scopeBadge(c.source, c.source === 'plugin' ? `${c.pluginName}@${c.marketplace}` : c.projectDir ?? '')}
+        <span class="text-dim" title="Tokens this command adds when invoked">${fmt.tokens(c.tokens)} tok</span>
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.cfg-list-item').forEach(item => {
+    item.addEventListener('click', () => {
+      cmdState.selected = Number(item.dataset.idx);
+      renderCommandList();
+      renderCommandDetail(cmdState.selected);
+    });
   });
 }
 
@@ -270,13 +279,19 @@ function renderCommandDetail(idx) {
   if (!c) return;
   const el = document.getElementById('cmd-detail');
   el.innerHTML = `
-    <div class="cfg-editor-card" style="margin-top:14px">
+    <div class="cfg-editor-card">
       <div class="cfg-editor-head">
         <code class="cfg-editor-path text-dim" title="${esc(c.path)}">${esc(c.path)}</code>
         ${c.editable
           ? `<button id="cmd-delete" class="btn btn-danger">Delete</button>
              <button id="cmd-save" class="btn btn-accent">Save</button>`
           : '<span class="text-dim" style="font-size:12px">plugin command — read-only</span>'}
+      </div>
+      <div class="cfg-card-desc text-dim">${esc(c.description || '—')}</div>
+      <div class="cfg-card-meta text-dim">
+        <code>/${esc(c.invokeName)}</code> · ${fmt.tokens(c.tokens)} tok/invocation
+        · args ${esc(c.argumentHint ?? (c.usesArguments ? '$ARGUMENTS' : '—'))}
+        ${c.overriddenBy ? ` · <span title="A same-named definition with higher priority wins">overridden by ${esc(c.overriddenBy)}</span>` : ''}
       </div>
       <textarea id="cmd-editor" class="cfg-editor" spellcheck="false" ${c.editable ? '' : 'readonly'}></textarea>
     </div>`;
@@ -296,7 +311,7 @@ function renderCommandDetail(idx) {
       loadCommandsTab();
     } catch (e) { toast(`Delete failed: ${e.message}`); }
   });
-  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  el.scrollTop = 0;
 }
 
 async function showNewCommandForm() {
@@ -344,6 +359,8 @@ const skillState = { list: [], selected: -1 };
 
 async function loadSkillsTab() {
   const root = document.getElementById('cfg-skills-root');
+  // Keep the open skill selected across the reload that follows a save.
+  const prevPath = skillState.list[skillState.selected]?.path ?? null;
   root.innerHTML = '<div class="audit-card skeleton" style="height:200px"></div>';
   try { skillState.list = await api(`/config/skills${pq()}`); }
   catch (e) { return cfgError('cfg-skills-root', e); }
@@ -352,13 +369,14 @@ async function loadSkillsTab() {
     root.innerHTML = '<p class="text-dim" style="padding:16px 0">No skills installed.</p>';
     return;
   }
-  skillState.selected = -1;
+  skillState.selected = prevPath ? skillState.list.findIndex(s => s.path === prevPath) : -1;
   root.innerHTML = `
     <div class="cfg-split cfg-split-narrow">
       <aside class="cfg-list" id="skill-list"></aside>
       <div id="skill-detail"><div class="cfg-placeholder text-dim">← Select a skill to see its details</div></div>
     </div>`;
   renderSkillList();
+  if (skillState.selected >= 0) renderSkillDetail(skillState.selected);
 }
 
 function renderSkillList() {
@@ -410,6 +428,7 @@ function renderSkillDetail(idx) {
         <div class="cfg-file-chips">${s.references.map(f => `<span class="cfg-chip" title="Reference file loaded on demand: references/${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}
       <textarea id="skill-editor" class="cfg-editor" spellcheck="false" ${s.editable ? '' : 'readonly'}></textarea>
     </div>`;
+  el.scrollTop = 0;
   document.getElementById('skill-editor').value = s.content;
   document.getElementById('skill-save')?.addEventListener('click', async () => {
     try {
@@ -507,6 +526,7 @@ function renderHookDetail(idx) {
       <div id="hook-script"></div>
     </div>`;
 
+  el.scrollTop = 0;
   el.querySelectorAll('.cfg-hook-action-card.clickable').forEach(card => {
     card.addEventListener('click', () => openHookScript(h.actions[Number(card.dataset.ai)].scriptPath));
   });
@@ -661,6 +681,7 @@ function renderMcpDetail(idx) {
           </div>`).join('')}
         </div>` : ''}
     </div>`;
+  el.scrollTop = 0;
 }
 
 // ===== Permissions =====
@@ -790,6 +811,7 @@ function renderMemoryTopics() {
         </summary>
         <pre class="cfg-mem-content">${esc(t.content)}</pre>
       </details>`).join('') || '<p class="text-dim">No topic files.</p>'}`;
+  el.scrollTop = 0;
 }
 
 // ===== Effective Configs =====
@@ -967,6 +989,7 @@ function renderGraphDetail(sel) {
         <span class="text-dim cfg-chain-desc" title="${esc(s.description)}">${esc(s.description)}</span>
       </div>`).join('')}
     </div>`;
+  el.scrollTop = 0;
 
   const degree = new Map();
   for (const e of edges) {
