@@ -9,10 +9,44 @@
   text-transform: uppercase; color: var(--text-faint);
 }
 
-/* --- generic split layout: list on the left, detail on the right --- */
-.cfg-split { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 16px; }
+/* --- generic split layout: list in the middle column, detail on the right ---
+   The tab fills the viewport (see .tab-fill) and each column scrolls on its
+   own, so scrolling the list never moves the detail panel and vice versa. --- */
+.cfg-split {
+  display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 16px;
+  flex: 1 1 auto; min-height: 320px;
+}
 .cfg-split-narrow { grid-template-columns: 250px 1fr; }
-@media (max-width: 900px) { .cfg-split, .cfg-split-narrow { grid-template-columns: 1fr; } }
+.cfg-split > * {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* breathing room so the raised card shadows aren't clipped by the scroller */
+  padding: 6px 9px 16px;
+}
+
+/* A tab whose body is a split view: fill the content area instead of growing
+   the page, so the columns get a bounded height to scroll inside. */
+.tab-content.tab-fill { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.tab-fill > .cfg-root { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* whatever sits above the split (chart, KPIs, search row) already spaces itself */
+.cfg-root > .cfg-split { margin-top: 0; }
+/* a filled tab reaches the bottom of the window — no page gutter needed */
+.content:has(> .tab-fill:not([hidden])) { padding-bottom: 14px; }
+
+/* A detail pane's card fills the pane, so its editor uses the free height
+   instead of leaving dead space underneath. */
+.cfg-split > * > .cfg-editor-card { display: flex; flex-direction: column; min-height: 100%; }
+.cfg-split > * > .cfg-editor-card > .cfg-editor { flex: 1 1 auto; min-height: 240px; }
+
+/* Stacked on narrow screens — one page scroll again, no nested scrollers. */
+@media (max-width: 900px) {
+  .cfg-split, .cfg-split-narrow { grid-template-columns: 1fr; }
+  .cfg-split { min-height: 0; }
+  .cfg-split > * { overflow-y: visible; padding: 0; }
+  .tab-content.tab-fill { flex: 0 0 auto; display: block; }
+  .tab-fill > .cfg-root { display: block; }
+}
 
 .cfg-placeholder { padding: 26px 8px; font-size: 13px; }
 

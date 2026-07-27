@@ -111,7 +111,14 @@ body {
 /* =================================================================
    App shell — sidebar + main column
    ================================================================= */
-.app-shell { display: flex; min-height: 100vh; }
+/* The shell owns the viewport: it never scrolls itself, so panes inside
+   (.content, and the split columns within it) each scroll on their own. */
+.app-shell {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
 
 .sidebar {
   width: 232px;
@@ -123,7 +130,10 @@ body {
   position: sticky;
   top: 0;
   align-self: flex-start;
-  height: 100vh;
+  height: 100%;
+  /* the shell no longer scrolls, so the nav needs its own scroll on short windows */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .brand {
@@ -179,6 +189,7 @@ body {
 .main-col {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -317,6 +328,12 @@ body {
 .content {
   flex: 1;
   width: 100%;
+  min-height: 0;
+  /* The page scroller. Tabs that fill the viewport (.tab-fill) keep their own
+     columns scrolling instead, so this stays put for them. */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   /* Match the topbar's gutters so cards align with the header actions */
   padding: 14px 30px 38px;
   /* Soft decorative glow — a nod to the reference's warm ambience */

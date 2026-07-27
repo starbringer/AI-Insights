@@ -160,13 +160,15 @@
           <div class="chart-row">
             <div class="chart-card">
               <div class="chart-card-head">
-                <div class="chart-card-title" title="Share of the input side served from prompt cache, per day. Cache reads cost ~10% of fresh input tokens.">Cache hit rate <span class="title-note">30d</span></div>
+                <div class="chart-card-title" title="Share of the input side served from prompt cache, per bucket in the selected range. Cache reads cost ~10% of fresh input tokens.">Cache hit rate</div>
+                <div class="range-group" data-chart="cacheHit"></div>
               </div>
               <div id="chart-cache-hit" style="height:220px"></div>
             </div>
             <div class="chart-card">
               <div class="chart-card-head">
-                <div class="chart-card-title" title="Total tokens per model over the last 30 days">Model mix <span class="title-note">30d</span></div>
+                <div class="chart-card-title" title="Total tokens per model in the selected range">Model mix</div>
+                <div class="range-group" data-chart="modelMix"></div>
               </div>
               <div id="chart-model-mix" style="height:220px"></div>
             </div>
@@ -194,15 +196,16 @@
           <div id="runs-table-wrap"></div>
         </section>
 
-        <!-- Harness tabs (rendered by config.js) -->
-        <section id="tab-claudemd" class="tab-content" hidden><div id="cfg-claudemd-root"></div></section>
-        <section id="tab-commands" class="tab-content" hidden><div id="cfg-commands-root"></div></section>
-        <section id="tab-skills" class="tab-content" hidden><div id="cfg-skills-root"></div></section>
-        <section id="tab-hooks" class="tab-content" hidden><div id="cfg-hooks-root"></div></section>
-        <section id="tab-mcp" class="tab-content" hidden><div id="cfg-mcp-root"></div></section>
+        <!-- Harness tabs (rendered by config.js).
+             tab-fill = list/detail split view: fills the viewport, columns scroll separately. -->
+        <section id="tab-claudemd" class="tab-content tab-fill" hidden><div id="cfg-claudemd-root" class="cfg-root"></div></section>
+        <section id="tab-commands" class="tab-content tab-fill" hidden><div id="cfg-commands-root" class="cfg-root"></div></section>
+        <section id="tab-skills" class="tab-content tab-fill" hidden><div id="cfg-skills-root" class="cfg-root"></div></section>
+        <section id="tab-hooks" class="tab-content tab-fill" hidden><div id="cfg-hooks-root" class="cfg-root"></div></section>
+        <section id="tab-mcp" class="tab-content tab-fill" hidden><div id="cfg-mcp-root" class="cfg-root"></div></section>
         <section id="tab-permissions" class="tab-content" hidden><div id="cfg-permissions-root"></div></section>
-        <section id="tab-memory" class="tab-content" hidden><div id="cfg-memory-root"></div></section>
-        <section id="tab-workflow" class="tab-content" hidden><div id="cfg-workflow-root"></div></section>
+        <section id="tab-memory" class="tab-content tab-fill" hidden><div id="cfg-memory-root" class="cfg-root"></div></section>
+        <section id="tab-workflow" class="tab-content tab-fill" hidden><div id="cfg-workflow-root" class="cfg-root"></div></section>
         <section id="tab-configs" class="tab-content" hidden><div id="cfg-configs-root"></div></section>
 
         <!-- Settings -->
