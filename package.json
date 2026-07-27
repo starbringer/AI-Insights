@@ -1,13 +1,13 @@
 {
-  "name": "llm-usage",
+  "name": "ai-insights",
   "version": "0.1.0",
-  "description": "Local web dashboard for LLM usage data — token counts, costs, session history, and configuration audit. Currently parses Claude Code's JSONL transcripts; designed to be extended to other providers (Gemini, ChatGPT, local Ollama, …). No external services.",
+  "description": "AI Insights — local web dashboard for AI coding tool usage: token counts, costs, session history, and harness configuration. Currently parses Claude Code's JSONL transcripts; designed to be extended to other providers (Gemini, ChatGPT, local Ollama, …). No external services.",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "start": "bun run server.ts",
     "dev": "bun --watch run server.ts",
-    "build": "bun build --compile --target=bun-windows-x64 server.ts --outfile dist/llm-usage.exe",
+    "build": "bun build --compile --target=bun-windows-x64 server.ts --outfile dist/ai-insights.exe",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

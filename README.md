@@ -1,9 +1,9 @@
-# LLM Usage Monitor
+# AI Insights
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-yellow)](https://buymeacoffee.com/starbringer)
 
-A local web app that turns raw LLM usage data into a live dashboard — token counts, costs, session history, and configuration health.
+Understand and improve how you use AI coding tools. A local web app that turns raw usage data into a live dashboard — token counts, costs, session history, and configuration health.
 
 Today it parses **Claude Code's JSONL transcripts**. The architecture is provider-agnostic, so other sources can be plugged in over time.
 
@@ -36,8 +36,8 @@ Check it: `bun --version`
 ### 2. Get the code
 
 ```bash
-git clone https://github.com/starbringer/llm-usage.git
-cd llm-usage
+git clone https://github.com/starbringer/ai-insights.git
+cd ai-insights
 ```
 
 ### 3. Install dependencies
@@ -86,7 +86,7 @@ bun run start        # start the server (same as bun run server.ts)
 bun run dev          # hot-reload with --watch
 bun run typecheck    # tsc --noEmit
 bun run test         # unit test suite
-bun run build        # compile to dist/llm-usage.exe (Windows x64)
+bun run build        # compile to dist/ai-insights.exe (Windows x64)
 ```
 
 ### Rebuilding the cache
@@ -98,12 +98,12 @@ itself whenever the schema version changes after an update.
 ### Standalone executable
 
 ```bash
-bun run build        # → dist/llm-usage.exe (~60MB, no Bun install needed)
+bun run build        # → dist/ai-insights.exe (~60MB, no Bun install needed)
 ```
 
 The binary embeds the Bun runtime; ship the `static/` folder alongside it. The
 `build` script targets Windows x64 — on macOS/Linux either run from source or
-retarget: `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/llm-usage`.
+retarget: `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/ai-insights`.
 
 ---
 

@@ -45,6 +45,6 @@ app.route("/api",           transcriptRouter);
 
 app.use("/*", serveStatic({ root: "./static" }));
 
-console.log(`LLM Usage Monitor → http://localhost:${PORT}`);
+console.log(`AI Insights → http://localhost:${PORT}`);
 
 export default { port: PORT, hostname: HOST, fetch: app.fetch };

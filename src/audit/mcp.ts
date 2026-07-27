@@ -83,7 +83,7 @@ function parseNdjson(raw: string): unknown[] {
 const INITIALIZE_MSG = {
   jsonrpc: "2.0", id: 1, method: "initialize", params: {
     protocolVersion: "2025-03-26", capabilities: {},
-    clientInfo: { name: "llm-usage", version: "0.1.0" } },
+    clientInfo: { name: "ai-insights", version: "0.1.0" } },
 };
 const INITIALIZED_MSG = { jsonrpc: "2.0", method: "notifications/initialized" };
 const TOOLS_LIST_MSG  = { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} };
