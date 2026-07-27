@@ -334,6 +334,19 @@ function processLine(
       ?? (u.cache_creation_input_tokens ?? 0);
     const cw1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
 
+    // Cost-attribution bucket from this line's tool_use blocks. Lines of the
+    // same message.id may carry different blocks — insertTurn keeps the
+    // highest priority seen (skill > mcp > base).
+    let bucket = 0;
+    if (Array.isArray(line.message.content)) {
+      for (const b of line.message.content as Record<string, unknown>[]) {
+        if (b["type"] !== "tool_use") continue;
+        const name = String(b["name"] ?? "");
+        if (name === "Skill") bucket = Math.max(bucket, 2);
+        else if (name.startsWith("mcp__")) bucket = Math.max(bucket, 1);
+      }
+    }
+
     insertTurn(db, {
       provider: PROVIDER_ID,
       agent_id: agentId,
@@ -351,6 +364,7 @@ function processLine(
       output_tokens: u.output_tokens ?? 0,
       service_tier: u.service_tier ?? null,
       raw_offset: rawOffset,
+      bucket,
     });
     ctx.turnCount++;
   }

@@ -8,6 +8,7 @@
   <!-- Set theme before first paint to avoid a flash of the wrong palette -->
   <script>document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light';</script>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/config.css">
 </head>
 <body>
   <div class="app-shell">
@@ -24,27 +25,56 @@
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
           <span class="nav-label">Dashboard</span>
         </button>
-        <button class="nav-item" data-tab="audit">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 5 16 3-8h3"/></svg>
-          <span class="nav-label">Audit</span>
-        </button>
         <button class="nav-item" data-tab="runs">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8.5" y1="6" x2="21" y2="6"/><line x1="8.5" y1="12" x2="21" y2="12"/><line x1="8.5" y1="18" x2="21" y2="18"/><circle cx="3.7" cy="6" r="1.6"/><circle cx="3.7" cy="12" r="1.6"/><circle cx="3.7" cy="18" r="1.6"/></svg>
           <span class="nav-label">Runs</span>
         </button>
+
+        <div class="nav-group-label">Harness</div>
+        <button class="nav-item" data-tab="claudemd">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2.5H6.5A2 2 0 0 0 4.5 4.5v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><path d="M14 2.5V8h5.5M8.5 13h7M8.5 17h7"/></svg>
+          <span class="nav-label">CLAUDE.md</span>
+        </button>
+        <button class="nav-item" data-tab="commands">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4.5 17 10 11.5 4.5 6"/><line x1="12.5" y1="19" x2="20" y2="19"/></svg>
+          <span class="nav-label">Commands</span>
+        </button>
+        <button class="nav-item" data-tab="skills">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l2.4 6.1 6.1 2.4-6.1 2.4L12 19.5l-2.4-6.1-6.1-2.4 6.1-2.4z"/><path d="M19 15.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z" transform="scale(.8) translate(5 5)"/></svg>
+          <span class="nav-label">Skills</span>
+        </button>
+        <button class="nav-item" data-tab="hooks">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5L4.5 13.5H11l-1 8 8.5-11H12z"/></svg>
+          <span class="nav-label">Hooks</span>
+        </button>
+        <button class="nav-item" data-tab="mcp">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.5" width="18" height="7" rx="2"/><rect x="3" y="13.5" width="18" height="7" rx="2"/><circle cx="7" cy="7" r=".6"/><circle cx="7" cy="17" r=".6"/></svg>
+          <span class="nav-label">MCP</span>
+        </button>
+        <button class="nav-item" data-tab="permissions">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3.5v5.5c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6z"/><path d="M8.8 12l2.2 2.2 4.2-4.2"/></svg>
+          <span class="nav-label">Permissions</span>
+        </button>
+        <button class="nav-item" data-tab="memory">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/><path d="M4 11.5v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+          <span class="nav-label">Memory</span>
+        </button>
+        <button class="nav-item" data-tab="workflow">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8.2 7.1l7.4 .7M7 8.3L8.4 15.7M16.2 10L10.8 16.2"/></svg>
+          <span class="nav-label">Workflow</span>
+        </button>
+        <button class="nav-item" data-tab="configs">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="17" r="2"/></svg>
+          <span class="nav-label">Configs</span>
+        </button>
+
+        <div class="nav-group-label">App</div>
         <button class="nav-item" data-tab="settings">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.5v3.2M12 18.3v3.2M21.5 12h-3.2M5.7 12H2.5M18.7 5.3l-2.3 2.3M7.6 16.4l-2.3 2.3M18.7 18.7l-2.3-2.3M7.6 7.6L5.3 5.3"/></svg>
           <span class="nav-label">Settings</span>
         </button>
       </nav>
 
-      <div class="sidebar-foot">
-        <button id="theme-toggle" class="nav-item theme-toggle" type="button" title="Toggle light / dark theme">
-          <svg class="nav-icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.8v2.6M12 19.6v2.6M4.4 4.4l1.9 1.9M17.7 17.7l1.9 1.9M1.8 12h2.6M19.6 12h2.6M4.4 19.6l1.9-1.9M17.7 6.3l1.9-1.9"/></svg>
-          <svg class="nav-icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.8A8.6 8.6 0 0 1 9.2 3.5a8.6 8.6 0 1 0 11.3 11.3z"/></svg>
-          <span class="nav-label">Theme</span>
-        </button>
-      </div>
     </aside>
 
     <!-- ===== Main column ===== -->
@@ -60,7 +90,10 @@
             <select id="provider-select" aria-label="Data source"></select>
             <span id="provider-data-pill" class="provider-pill" hidden></span>
           </div>
-          <button id="btn-rerun" class="btn">↻ Re-run audit</button>
+          <button id="theme-toggle" class="btn btn-icon" type="button" title="Toggle light / dark theme">
+            <svg class="nav-icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.8v2.6M12 19.6v2.6M4.4 4.4l1.9 1.9M17.7 17.7l1.9 1.9M1.8 12h2.6M19.6 12h2.6M4.4 19.6l1.9-1.9M17.7 6.3l1.9-1.9"/></svg>
+            <svg class="nav-icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.8A8.6 8.6 0 0 1 9.2 3.5a8.6 8.6 0 1 0 11.3 11.3z"/></svg>
+          </button>
           <a href="https://claude.ai/settings/usage" target="_blank" rel="noopener" class="btn btn-accent">
             Open claude.ai ↗
           </a>
@@ -124,22 +157,26 @@
               <div id="chart-skill-usage" style="height:220px"></div>
             </div>
           </div>
+          <div class="chart-row">
+            <div class="chart-card">
+              <div class="chart-card-head">
+                <div class="chart-card-title" title="Share of the input side served from prompt cache, per day. Cache reads cost ~10% of fresh input tokens.">Cache hit rate <span class="title-note">30d</span></div>
+              </div>
+              <div id="chart-cache-hit" style="height:220px"></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-head">
+                <div class="chart-card-title" title="Total tokens per model over the last 30 days">Model mix <span class="title-note">30d</span></div>
+              </div>
+              <div id="chart-model-mix" style="height:220px"></div>
+            </div>
+          </div>
           <div class="chart-card">
             <div class="chart-card-head">
               <div class="chart-card-title">Top 10 runs by tokens — click a bar to open its detail</div>
               <div class="range-group" data-chart="topRuns"></div>
             </div>
             <div id="chart-top-runs" style="height:340px"></div>
-          </div>
-        </section>
-
-        <!-- Audit -->
-        <section id="tab-audit" class="tab-content" hidden>
-          <div class="audit-grid" id="audit-grid">
-            <div class="audit-card skeleton" style="height:260px"></div>
-            <div class="audit-card skeleton" style="height:260px"></div>
-            <div class="audit-card skeleton" style="height:260px"></div>
-            <div class="audit-card skeleton" style="height:260px"></div>
           </div>
         </section>
 
@@ -156,6 +193,17 @@
           </div>
           <div id="runs-table-wrap"></div>
         </section>
+
+        <!-- Harness tabs (rendered by config.js) -->
+        <section id="tab-claudemd" class="tab-content" hidden><div id="cfg-claudemd-root"></div></section>
+        <section id="tab-commands" class="tab-content" hidden><div id="cfg-commands-root"></div></section>
+        <section id="tab-skills" class="tab-content" hidden><div id="cfg-skills-root"></div></section>
+        <section id="tab-hooks" class="tab-content" hidden><div id="cfg-hooks-root"></div></section>
+        <section id="tab-mcp" class="tab-content" hidden><div id="cfg-mcp-root"></div></section>
+        <section id="tab-permissions" class="tab-content" hidden><div id="cfg-permissions-root"></div></section>
+        <section id="tab-memory" class="tab-content" hidden><div id="cfg-memory-root"></div></section>
+        <section id="tab-workflow" class="tab-content" hidden><div id="cfg-workflow-root"></div></section>
+        <section id="tab-configs" class="tab-content" hidden><div id="cfg-configs-root"></div></section>
 
         <!-- Settings -->
         <section id="tab-settings" class="tab-content" hidden>
@@ -197,7 +245,14 @@
       <aside class="sd-agents" id="sd-agents">
         <div class="sd-placeholder text-dim">Loading…</div>
       </aside>
-      <div class="sd-canvas" id="sd-canvas"></div>
+      <div class="sd-canvas" id="sd-canvas">
+        <div class="sd-view-tabs">
+          <button class="sd-view-tab active" data-view="tree" title="Replay the session as a tree of prompts, LLM calls and tools">Tree</button>
+          <button class="sd-view-tab" data-view="usage" title="Token & cost breakdown for this run (buckets, models, spend curve)">Usage</button>
+        </div>
+        <div id="sd-tree-view"></div>
+        <div id="sd-usage-view" hidden></div>
+      </div>
       <div class="sd-detail" id="sd-detail">
         <div class="sd-placeholder text-dim">← Click a node to view details</div>
       </div>
@@ -206,5 +261,6 @@
 
   <script src="/lib/echarts.min.js"></script>
   <script src="/app.js"></script>
+  <script src="/config.js"></script>
 </body>
 </html>

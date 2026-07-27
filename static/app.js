@@ -40,16 +40,6 @@ const COLOR = {
   yellow:'#e3a838',
 };
 
-function statusIcon(s) {
-  if (s === 'ok')    return '<span class="status-ok">✓</span>';
-  if (s === 'warn')  return '<span class="status-warn">⚠</span>';
-  if (s === 'error') return '<span class="status-error">✕</span>';
-  return '';
-}
-function statusClass(s) {
-  return s === 'ok' ? 'ok' : s === 'warn' ? 'warn' : s === 'error' ? 'error' : '';
-}
-
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g,'&amp;')
@@ -246,10 +236,18 @@ let currentTab = 'dashboard';
 const tabData = {};
 
 const PAGE_META = {
-  dashboard: ['Dashboard', 'Token usage at a glance'],
-  audit:     ['Configuration Audit', 'Data-driven findings about your Claude Code setup'],
-  runs:      ['Runs', 'Browse and inspect every recorded run'],
-  settings:  ['Settings', 'Tune audit thresholds and reference pricing'],
+  dashboard:   ['Dashboard', 'Token usage at a glance'],
+  runs:        ['Runs', 'Browse and inspect every recorded run'],
+  settings:    ['Settings', 'Tune warning thresholds and reference pricing'],
+  claudemd:    ['Instructions', 'View and edit the instruction files injected into every session'],
+  commands:    ['Commands', 'Slash commands across user, project and plugin sources'],
+  skills:      ['Skills', 'Installed skills, their triggers and recorded usage'],
+  hooks:       ['Hooks', 'Configured hooks across settings layers, with recorded fires'],
+  mcp:         ['MCP Servers', 'Configured MCP servers, their tools and token overhead'],
+  permissions: ['Permissions', 'Allow / deny / ask rules across settings layers'],
+  memory:      ['Memory', 'Persistent per-project memory stores'],
+  workflow:    ['Workflows', 'Detected workflow chains across skills, hooks, MCP servers and commands'],
+  configs:     ['Effective Configs', 'Merged settings layers — which value wins and where it comes from'],
 };
 
 function switchTab(tab) {
@@ -267,9 +265,10 @@ function switchTab(tab) {
 
 function loadTab(tab) {
   if (tab === 'dashboard') loadDashboard();
-  else if (tab === 'audit') loadAudit();
   else if (tab === 'runs') loadRuns();
   else if (tab === 'settings') loadSettings();
+  // Harness tabs live in config.js and register themselves here.
+  else if (window.ConfigPages?.[tab]) window.ConfigPages[tab]();
 }
 
 // ===== Dashboard =====
@@ -316,6 +315,8 @@ async function loadDashboard() {
   const jobs = [
     ['stats', async () => renderKpiCards(await api('/stats'))],
     ...Object.entries(CHART_LOADERS).map(([key, load]) => [key, () => load(chartRange(key))]),
+    ['cacheHit', async () => renderCacheHitChart(await api('/timeseries?days=30'))],
+    ['modelMix', async () => renderModelMixChart(await api('/models?range=30d'))],
   ];
 
   // allSettled so a single missing endpoint (e.g. server not restarted after
@@ -550,350 +551,47 @@ function renderTopRunsChart(runs) {
   });
 }
 
-// ===== Audit =====
-
-async function loadAudit() {
-  const grid = document.getElementById('audit-grid');
-  grid.innerHTML = '<div class="audit-card skeleton" style="height:260px"></div>'.repeat(4);
-  try {
-    const report = await api('/audit');
-    grid.innerHTML = '';
-    grid.appendChild(buildClaudeMdCard(report.claudeMd));
-    grid.appendChild(buildHooksCard(report.hooks));
-    grid.appendChild(buildMcpCard(report.mcp, report.agents30d ?? 0));
-    grid.appendChild(buildCacheHitCard(report));
-    grid.appendChild(buildSkillsCard(report.skills));
-    grid.appendChild(buildSettingsCard(report.settings));
-    grid.appendChild(buildPluginsCard(report.plugins));
-    grid.appendChild(buildModelMixCard(report.modelMix, report));
-  } catch (e) {
-    grid.innerHTML = `<p class="text-error">${esc(e.message)}</p>`;
-  }
-}
-
-function auditCard(title, status, headlineHtml, chartId, chartHeight, fixHtml) {
-  const div = document.createElement('div');
-  div.className = 'audit-card';
-  div.innerHTML = `
-    <div class="audit-card-header">
-      <span class="audit-card-title">${esc(title)}</span>
-      ${statusIcon(status)}
-    </div>
-    <div class="audit-card-headline text-dim">${headlineHtml}</div>
-    <div class="audit-chart" id="${chartId}" style="height:${chartHeight}px"></div>
-    <details class="audit-fix">
-      <summary>Tips</summary>
-      ${fixHtml}
-    </details>
-  `;
-  return div;
-}
-
-function buildClaudeMdCard(d) {
-  if (!d) return emptyCard('CLAUDE.md');
-  const fileCt = d.files?.length ?? 0;
-  const headline = `${fileCt} file${fileCt !== 1 ? 's' : ''} · ${fmt.tokens(d.totalTokens)} tokens · ${d.totalWords} words · ${d.agentCount30d ?? 0} agents (30d) · est. ${fmt.tokens(d.estimatedInjectedTokens30d)} injected`;
-  const fileRows = (d.files ?? []).map(f =>
-    `<li><code>${esc(f.label)}</code> — ${fmt.tokens(f.tokens)} tokens / ${f.words} words</li>`).join('');
-  const fix = `<ul>
-    ${fileRows}
-    <li>Move project-specific rules to <code>&lt;project&gt;/.claude/CLAUDE.md</code></li>
-    <li>Extract complex patterns into Skills (loaded on demand, not always injected)</li>
-    <li>Remove explanatory comments — keep only imperative instructions</li>
-  </ul>`;
-  const card = auditCard('CLAUDE.md', d.status, headline, 'chart-claudemd', 140, fix);
-  setTimeout(() => {
-    const chart = initChart('chart-claudemd');
-    if (!chart || !d.dailySeries?.length) return;
-    const dates = d.dailySeries.map(x => x.date);
-    const vals  = d.dailySeries.map(x => x.injectedTokens);
-    chart.setOption({ ...baseOption(),
-      grid: { left:8, right:14, top:16, bottom:8, containLabel:true },
-      xAxis: { type:'category', data:dates, axisLabel:{color:COLOR.dim} },
-      yAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
-      series: [{ type:'line', data:vals, smooth:true, areaStyle:{opacity:.3}, itemStyle:{color:COLOR.blue}, lineStyle:{color:COLOR.blue} }],
-      tooltip: { trigger:'axis', formatter: p => `${p[0].name}: ${fmt.tokens(p[0].value)} injected` },
-    });
-  }, 50);
-  return card;
-}
-
-function buildHooksCard(d) {
-  if (!d) return emptyCard('Hooks');
-  const totalFires7d = d.fires7d?.reduce((s,f) => s + f.fires7d, 0) ?? 0;
-  const totalTokens7d = d.fires7d?.reduce((s,f) => s + f.estimatedTokens, 0) ?? 0;
-  const headline = `${d.entries.length} hook entries · ${totalFires7d} recorded fires / 7 days · ~${fmt.tokens(totalTokens7d)} tokens`;
-  const fix = `<ul>
-    <li>Disable plugin: <code>claude plugin disable &lt;name&gt;</code></li>
-    <li>Remove hook from <code>~/.claude/settings.json</code> under <code>hooks.&lt;event&gt;</code></li>
-    <li>Consider if UserPromptSubmit hooks can be replaced with Skills</li>
-  </ul>`;
-  const card = auditCard('Hooks', d.status, headline, 'chart-hooks', 160, fix);
-  setTimeout(() => {
-    const chart = initChart('chart-hooks');
-    if (!chart || !d.fires7d?.length) return;
-    const data = d.fires7d.map(f => ({ name: f.event, value: f.fires7d }));
-    chart.setOption({ ...baseOption(),
-      grid: { left:6, right:58, top:8, bottom:8, containLabel:true },
-      xAxis: { type:'value', axisLabel:{formatter:v=>fmt.tokens(v), color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
-      yAxis: { type:'category', data:data.map(d=>d.name), axisLabel:{color:COLOR.dim, fontSize:10} },
-      series: [{ type:'bar', data:data.map(d=>d.value), itemStyle:{color:COLOR.purple},
-        label:{show:true, position:'right', formatter:p=>fmt.tokens(p.value), color:COLOR.dim} }],
-      tooltip: { formatter: p => {
-        const f = d.fires7d[p.dataIndex];
-        return `${esc(p.name)}: ${f?.fires7d ?? 0} fires · ~${fmt.tokens(f?.estimatedTokens ?? 0)} est. tokens/7d`;
-      } },
-    });
-  }, 50);
-  return card;
-}
-
-function buildMcpCard(d, sessions30d = 0) {
-  if (!d) return emptyCard('MCPs');
-  const headline = `${d.servers.length} server${d.servers.length !== 1 ? 's' : ''} · ${d.totalTools} tools · ${fmt.tokens(d.totalSchemaTokens)} schema tokens`;
-  const fix = `<ul>
-    <li>Servers are read from <code>~/.claude.json</code> (user + local scope) and each project's <code>.mcp.json</code> (project scope)</li>
-    <li>Remove user-scope server: <code>claude mcp remove &lt;name&gt; -s user</code></li>
-    <li>Remove local-scope server: <code>claude mcp remove &lt;name&gt; -s local</code></li>
-    <li>Prefer servers with fewer tools to reduce schema token overhead</li>
-    <li>Schema tokens are injected every session; reduce servers to save cache budget</li>
-  </ul>`;
-  const scopeColor = { user:'#4d8af0', 'claude.ai':'#4df09a', desktop:'#7a7d96', local:'#f09a4d', project:'#9a4df0' };
-  const card = auditCard('MCPs', d.status, headline, 'chart-mcps', 0, fix);
-  const chartEl = card.querySelector('#chart-mcps');
-  if (!chartEl) return card;
-  chartEl.style.height = 'auto';
-
-  const diagHtml = d.diagnostics?.length
-    ? `<details class="mcp-diagnostics"><summary>${d.diagnostics.length} diagnostic${d.diagnostics.length !== 1 ? 's' : ''}</summary>
-        <ul>${d.diagnostics.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>`
-    : '';
-
-  if (!d.servers?.length) {
-    chartEl.innerHTML = `<p style="color:var(--dim);font-size:12px;margin-top:8px">No MCP servers found in
-      <code>~/.claude.json</code> (user/local scope) or any project's <code>.mcp.json</code>.</p>${diagHtml}`;
-    return card;
-  }
-
-  const showEst = sessions30d > 0;
-  chartEl.innerHTML = `<table class="mcp-table" style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse">
-    <thead><tr>
-      <th style="text-align:left;color:var(--dim);padding:4px 8px 4px 0;font-weight:500;border-bottom:1px solid var(--border)">Name</th>
-      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)">Scope</th>
-      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)">Type</th>
-      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right">Tools</th>
-      <th style="color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right">Schema tokens</th>
-      ${showEst ? `<th style="color:var(--dim);padding:4px 0 4px 8px;font-weight:500;border-bottom:1px solid var(--border);text-align:right" title="schemaTokens × sessions in last 30d (upper bound)">Est. 30d tokens</th>` : ''}
-    </tr></thead>
-    <tbody>${d.servers.map((s, i) => {
-      const sc = s.scope ?? 'user';
-      const color = scopeColor[sc] ?? '#7a7d96';
-      const est30d = (s.schemaTokens || 0) * sessions30d;
-      const expandable = (s.tools?.length ?? 0) > 0;
-      const hint = expandable ? `<span class="mcp-expand-caret">▸</span> ` : '';
-      const scopeTitle = s.project ? `${sc} — ${s.project}` : sc;
-      return `<tr class="mcp-server-row${expandable ? ' expandable' : ''}" data-idx="${i}" title="${esc(s.source ?? '')}">
-        <td style="padding:4px 8px 4px 0;white-space:nowrap">${hint}<code style="font-size:11px">${esc(s.name)}</code></td>
-        <td style="padding:4px 8px;white-space:nowrap">
-          <span title="${esc(scopeTitle)}" style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600">${esc(sc)}</span>
-        </td>
-        <td style="padding:4px 8px;color:var(--dim);font-size:11px">${esc(s.type ?? '—')}</td>
-        <td style="padding:4px 8px;text-align:right;color:var(--dim);font-size:11px">${s.toolCount || (s.probeError ? `<span class="status-warn" title="${esc(s.probeError)}">?</span>` : '—')}</td>
-        <td style="padding:4px 8px;text-align:right;color:var(--dim);font-size:11px">${s.schemaTokens ? fmt.tokens(s.schemaTokens) : '—'}</td>
-        ${showEst ? `<td style="padding:4px 0 4px 8px;text-align:right;color:var(--dim);font-size:11px">${est30d ? fmt.tokens(est30d) : '—'}</td>` : ''}
-      </tr>
-      ${expandable ? `<tr class="mcp-tools-row" data-for="${i}" hidden><td colspan="${showEst ? 6 : 5}">
-        <div class="mcp-tools-list">${s.tools.map((t, ti) => `
-          <div class="mcp-tool" data-tool="${i}:${ti}">
-            <div class="mcp-tool-head">
-              <code>${esc(t.name)}</code>
-              <span class="mcp-tool-tokens">${fmt.tokens(t.tokens)} tok</span>
-            </div>
-            ${t.description ? `<div class="mcp-tool-desc">${esc(t.description)}</div>` : ''}
-            <details class="mcp-tool-schema"><summary>Input schema</summary>
-              <pre>${esc(JSON.stringify(t.inputSchema, null, 2) ?? 'null')}</pre>
-            </details>
-          </div>`).join('')}
-        </div>
-      </td></tr>` : ''}`;
-    }).join('')}</tbody>
-  </table>
-  ${showEst ? `<p style="color:var(--dim);font-size:10px;margin-top:6px">Est. 30d = schema tokens × ${sessions30d} agents in the last 30 days (upper bound; user/local MCPs inject into every session)</p>` : ''}
-  ${diagHtml}`;
-
-  // Click a server row to expand its tool list with schemas.
-  chartEl.querySelectorAll('.mcp-server-row.expandable').forEach(row => {
-    row.addEventListener('click', () => {
-      const detail = chartEl.querySelector(`.mcp-tools-row[data-for="${row.dataset.idx}"]`);
-      if (!detail) return;
-      detail.hidden = !detail.hidden;
-      row.classList.toggle('open', !detail.hidden);
-      const caret = row.querySelector('.mcp-expand-caret');
-      if (caret) caret.textContent = detail.hidden ? '▸' : '▾';
-    });
+// Daily cache-hit-rate line over the last 30 days, with the 50% guide line.
+function renderCacheHitChart(series) {
+  const chart = initChart('chart-cache-hit');
+  if (!chart) return;
+  if (!series?.length) return renderChartEmpty(chart, 'No usage in the last 30 days');
+  const rates = series.map(d => {
+    const cr = d.cacheRead ?? 0;
+    const total = (d.input ?? 0) + (d.cacheCreate5m ?? 0) + (d.cacheCreate1h ?? 0) + cr;
+    return total ? +(cr / total * 100).toFixed(1) : 0;
   });
-  return card;
+  chart.setOption({ ...baseOption(),
+    grid: { left: 8, right: 14, top: 16, bottom: 8, containLabel: true },
+    xAxis: { type: 'category', data: series.map(d => d.date), axisLabel: { color: COLOR.dim } },
+    yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: v => `${v}%`, color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
+    series: [{
+      type: 'line', data: rates, smooth: true,
+      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(77,240,154,.3)' }, { offset: 1, color: 'rgba(77,240,154,.02)' }] } },
+      lineStyle: { color: COLOR.green }, itemStyle: { color: COLOR.green },
+      markLine: { silent: true, data: [{ yAxis: 50, lineStyle: { color: COLOR.yellow, type: 'dashed' } }], label: { formatter: '50%', color: COLOR.yellow } },
+    }],
+    tooltip: { trigger: 'axis', formatter: p => `${p[0].name}: ${p[0].value}% served from cache` },
+  });
 }
 
-function buildCacheHitCard(report) {
-  const rate = report.cacheHitRate30d ?? 0;
-  const status = rate >= 50 ? 'ok' : 'warn';
-  const headline = `${fmt.pct(rate)} cache hit rate (30-day avg)`;
-  const fix = `<ul>
-    <li>Enable 1h cache: use <code>/cache</code> command or add cache_control to prompts</li>
-    <li>Avoid long idle gaps — 5m cache expires after 5 minutes of inactivity</li>
-    <li>Keep CLAUDE.md and system prompts stable across turns (changes bust the cache)</li>
-  </ul>`;
-  const card = auditCard('Cache hit rate', status, headline, 'chart-cache', 160, fix);
-  setTimeout(async () => {
-    const chart = initChart('chart-cache');
-    if (!chart) return;
-    try {
-      const series = await api('/timeseries?days=30');
-      const rates = series.map(d => {
-        const cr = d.cacheRead ?? 0;
-        const total = (d.input ?? 0) + (d.cacheCreate5m ?? 0) + (d.cacheCreate1h ?? 0) + cr;
-        return total ? +(cr / total * 100).toFixed(1) : 0;
-      });
-      chart.setOption({ ...baseOption(),
-        grid: { left:48, right:12, top:16, bottom:24 },
-        xAxis: { type:'category', data:series.map(d=>d.date), axisLabel:{color:COLOR.dim} },
-        yAxis: { type:'value', min:0, max:100, axisLabel:{formatter:v=>`${v}%`, color:COLOR.dim}, splitLine:{lineStyle:{color:gridLine()}} },
-        series: [{
-          type:'line', data:rates, smooth:true,
-          areaStyle:{ color:{ type:'linear', x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'rgba(77,240,154,.3)'},{offset:1,color:'rgba(77,240,154,.02)'}] }},
-          lineStyle:{color:COLOR.green}, itemStyle:{color:COLOR.green},
-          markLine:{ silent:true, data:[{yAxis:50,lineStyle:{color:COLOR.yellow,type:'dashed'}}], label:{formatter:'50% threshold', color:COLOR.yellow} },
-        }],
-        tooltip: { trigger:'axis', formatter: p=>`${p[0].name}: ${p[0].value}%` },
-      });
-    } catch { /* skip chart on error */ }
-  }, 50);
-  return card;
-}
-
-function buildSkillsCard(d) {
-  if (!d) return emptyCard('Skills');
-  const headline = `${d.count} skills installed`;
-  const fix = `<ul>
-    <li>Skills are loaded on demand (progressive disclosure) — no per-session overhead</li>
-    <li>Unused skills do not consume tokens; no action needed</li>
-    <li>Remove a skill: delete <code>~/.claude/skills/&lt;name&gt;/</code></li>
-  </ul>`;
-  const card = auditCard('Skills', 'ok', headline, 'chart-skills', 0, fix);
-  const chartEl = card.querySelector('#chart-skills');
-  if (chartEl && d.skills.length) {
-    chartEl.style.height = 'auto';
-    chartEl.innerHTML = `<table style="width:100%;font-size:12px;margin-top:4px;border-collapse:collapse">
-      <thead><tr>
-        <th style="text-align:left;color:var(--dim);padding:4px 8px 4px 0;font-weight:500;border-bottom:1px solid var(--border)">Name</th>
-        <th style="text-align:right;color:var(--dim);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)">SKILL.md tokens</th>
-        <th style="text-align:left;color:var(--dim);padding:4px 0 4px 8px;font-weight:500;border-bottom:1px solid var(--border)">Description</th>
-      </tr></thead>
-      <tbody>${d.skills.map(s=>`<tr>
-        <td style="padding:3px 8px 3px 0;white-space:nowrap"><code style="font-size:11px">${esc(s.name)}</code></td>
-        <td style="text-align:right;padding:3px 8px;color:var(--dim);font-size:11px">${s.tokens ? fmt.tokens(s.tokens) : '—'}</td>
-        <td style="color:var(--dim);padding:3px 0 3px 8px;font-size:11px">${esc(s.description)}</td>
-      </tr>`).join('')}</tbody>
-    </table>`;
-  }
-  return card;
-}
-
-function buildPluginsCard(d) {
-  if (!d) return emptyCard('Plugins');
-  const headline = d.installed.length
-    ? `${d.installed.length} plugin(s) installed`
-    : 'No plugins installed';
-  const fix = `<ul>
-    <li>Plugins may inject additional hooks, MCPs, or skills</li>
-    <li>Uninstall: <code>claude plugin uninstall &lt;name&gt;</code></li>
-    <li>Review injected hooks/MCPs in the Hooks and MCP cards above</li>
-  </ul>`;
-  const card = auditCard('Plugins', 'ok', headline, 'chart-plugins', 0, fix);
-  const chartEl = card.querySelector('#chart-plugins');
-  if (chartEl && d.installed.length) {
-    chartEl.style.height = 'auto';
-    chartEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
-      ${d.installed.map(p=>`<span style="background:var(--bg3);border:1px solid var(--border);
-        border-radius:4px;padding:2px 8px;font-size:11px;color:var(--dim)">${esc(p.name)} ${p.version?`<span style="opacity:.5">${esc(p.version)}</span>`:''}</span>`).join('')}
-    </div>`;
-  }
-  return card;
-}
-
-function buildModelMixCard(d, report) {
-  if (!d) return emptyCard('Model mix');
-  const topModel = Object.entries(d.totals ?? {}).sort((a,b)=>b[1]-a[1])[0];
-  const headline = topModel ? `Dominant: ${topModel[0]} (${fmt.tokens(topModel[1])} tokens, 30d)` : 'No data yet';
-  const fix = `<ul>
-    <li>Switch to a lighter model for routine tasks: <code>/model claude-haiku-4-5</code></li>
-    <li>Opus is 15× more expensive than Haiku per token</li>
-    <li>Reserve Opus for complex reasoning; use Sonnet or Haiku for coding/editing</li>
-  </ul>`;
-  const card = auditCard('Model mix', d.status, headline, 'chart-modelmix', 210, fix);
-  setTimeout(async () => {
-    const chart = initChart('chart-modelmix');
-    if (!chart) return;
-    try {
-      const ago30 = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
-      const models = await api(`/models?since=${ago30}`);
-      if (!models.length) return;
-      const palette = [COLOR.blue, COLOR.orange, COLOR.purple, COLOR.green, COLOR.yellow];
-      // Horizontal bars: model names sit on the y-axis so they're never rotated
-      // or clipped; containLabel guarantees the longest name still fits, and the
-      // right margin leaves room for the token-count label. Largest model on top.
-      const rows = [...models].reverse();
-      const names = rows.map(m => m.model.replace('claude-','').replace(/-(\d)/g,' $1'));
-      chart.setOption({ ...baseOption(),
-        grid: { left: 6, right: 76, top: 14, bottom: 8, containLabel: true },
-        // Each bar carries its exact total as an end label, so the x-axis tick
-        // numbers are redundant — and they crowd into an unreadable pile on a
-        // narrow plot. Hide them; keep the split lines for a sense of scale.
-        xAxis: { type:'value', axisLabel:{show:false}, axisTick:{show:false}, splitLine:{lineStyle:{color:gridLine()}} },
-        yAxis: { type:'category', data:names, axisLabel:{color:COLOR.dim, fontSize:11}, axisTick:{show:false} },
-        series: [{ type:'bar', barMaxWidth:24,
-          data: rows.map((m,i)=>({value:m.total, itemStyle:{color:palette[i%palette.length]}})),
-          label:{show:true, position:'right', formatter:p=>fmt.tokens(p.value), color:COLOR.dim, fontSize:11} }],
-        tooltip: { trigger:'item', formatter: p => `${esc(p.name)}: ${fmt.tokens(p.value)} tokens` },
-      });
-    } catch { /* skip */ }
-  }, 50);
-  return card;
-}
-
-function buildSettingsCard(d) {
-  if (!d) return emptyCard('Settings');
-  const headline = d.model
-    ? `Default model: <code>${esc(d.model)}</code>${d.effortLevel ? ` · effort: ${esc(d.effortLevel)}` : ''}`
-    : 'No default model set (per-session choice)';
-  const fix = `<ul>
-    <li>Change default model: <code>/model</code> or edit <code>~/.claude/settings.json</code></li>
-    <li>Prune stale entries from <code>permissions.allow</code> — each is matched on every tool call</li>
-    <li>Never enable auto-approve globally; scope permissions per project instead</li>
-  </ul>`;
-  const card = auditCard('Settings', d.status, headline, 'chart-settings', 0, fix);
-  const el = card.querySelector('#chart-settings');
-  if (el) {
-    el.style.height = 'auto';
-    el.innerHTML = `<table style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse">
-      <tbody>
-        <tr><td style="padding:4px 8px 4px 0;color:var(--dim)">Allow rules</td><td class="td-num">${d.permissionsAllow ?? 0}</td></tr>
-        <tr><td style="padding:4px 8px 4px 0;color:var(--dim)">Deny rules</td><td class="td-num">${d.permissionsDeny ?? 0}</td></tr>
-        <tr><td style="padding:4px 8px 4px 0;color:var(--dim)">Auto-approve all</td>
-            <td class="td-num">${d.hasAutoApprove ? '<span class="status-warn">⚠ enabled</span>' : 'off'}</td></tr>
-      </tbody>
-    </table>`;
-  }
-  return card;
-}
-
-function emptyCard(title) {
-  const d = document.createElement('div');
-  d.className = 'audit-card';
-  d.innerHTML = `<div class="audit-card-header"><span class="audit-card-title">${esc(title)}</span></div>
-    <div class="text-dim">No data</div>`;
-  return d;
+// Total tokens per model over the last 30 days — horizontal bars, largest on top.
+function renderModelMixChart(models) {
+  const chart = initChart('chart-model-mix');
+  if (!chart) return;
+  if (!models?.length) return renderChartEmpty(chart, 'No usage in the last 30 days');
+  const palette = [COLOR.blue, COLOR.orange, COLOR.purple, COLOR.green, COLOR.yellow];
+  const rows = [...models].reverse();
+  const names = rows.map(m => m.model.replace('claude-', '').replace(/-(\d)/g, ' $1'));
+  chart.setOption({ ...baseOption(),
+    grid: { left: 6, right: 76, top: 14, bottom: 8, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { show: false }, axisTick: { show: false }, splitLine: { lineStyle: { color: gridLine() } } },
+    yAxis: { type: 'category', data: names, axisLabel: { color: COLOR.dim, fontSize: 11 }, axisTick: { show: false } },
+    series: [{ type: 'bar', barMaxWidth: 24,
+      data: rows.map((m, i) => ({ value: m.total, itemStyle: { color: palette[i % palette.length] } })),
+      label: { show: true, position: 'right', formatter: p => fmt.tokens(p.value), color: COLOR.dim, fontSize: 11 } }],
+    tooltip: { trigger: 'item', formatter: p => `${esc(p.name)}: ${fmt.tokens(p.value)} tokens` },
+  });
 }
 
 // ===== Runs =====
@@ -950,7 +648,7 @@ function renderRunsTable(rows, total) {
       const title = r.title ?? 'Untitled';
       const cwd   = r.cwd ?? '';
       const agentBadge = (r.agent_count ?? 1) > 1
-        ? `<span class="run-agents-badge">× ${r.agent_count}</span>`
+        ? `<span class="run-agents-badge" title="This run spawned ${r.agent_count} agents (main agent + sub-agents)">× ${r.agent_count}</span>`
         : '';
       return `<tr>
       <td style="padding:0 6px 0 0"><button class="btn-sm btn-view" data-rid="${esc(r.run_id)}" data-title="${esc(title)}" data-cwd="${esc(cwd)}">View</button></td>
@@ -1076,22 +774,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!document.getElementById('sd-page').hidden) refreshSessionDetail();
   });
 
-  document.getElementById('btn-rerun').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-rerun');
-    btn.disabled = true;
-    btn.textContent = 'Running…';
-    try {
-      await apiPost('/audit/refresh');
-      toast('Audit refreshed');
-      if (currentTab === 'audit') loadAudit();
-    } catch (e) {
-      toast(`Error: ${e.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '↻ Re-run audit';
-    }
-  });
-
   let searchTimer = null;
   document.getElementById('search-input').addEventListener('input', e => {
     clearTimeout(searchTimer);
@@ -1116,7 +798,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadProviders();
 
-  const validTabs = ['dashboard', 'audit', 'runs', 'settings'];
+  const validTabs = Object.keys(PAGE_META);
   const runLink = location.hash.match(/^#run=(.+)$/);
   const hashTab = location.hash.replace('#', '');
   const initialTab = validTabs.includes(hashTab) ? hashTab : runLink ? 'runs' : 'dashboard';
@@ -1171,8 +853,12 @@ async function openRunDetail(runId, title, cwd) {
   const sdPage  = document.getElementById('sd-page');
   const sdBody  = document.getElementById('sd-body');
   const agentsEl = document.getElementById('sd-agents');
-  const canvasEl = document.getElementById('sd-canvas');
+  const canvasEl = document.getElementById('sd-tree-view');
   const detailEl = document.getElementById('sd-detail');
+
+  // Fresh run → back to the Tree view; the Usage report reloads on demand.
+  runUsageCache = null;
+  setRunView('tree');
 
   document.getElementById('modal-title').textContent = title || 'Run';
   document.getElementById('modal-subtitle').textContent = cwd ? `${cwd}  ·  ${runId}` : runId;
@@ -1246,7 +932,7 @@ function renderAgentSidebar(runData) {
   const items = agents.map(a => {
     const isChild = a.is_subagent === 1;
     const title = a.title?.trim() || a.description?.trim() || '(untitled)';
-    const pill = a.agent_type ? `<span class="sd-agent-type-pill">${esc(a.agent_type)}</span>` : '';
+    const pill = a.agent_type ? `<span class="sd-agent-type-pill" title="Sub-agent type (the agent definition used for this spawn)">${esc(a.agent_type)}</span>` : '';
     const tokens = fmt.tokens(a.total ?? 0);
     return `<div class="sd-agent-item ${isChild ? 'child' : ''}" data-aid="${esc(a.agent_id)}">
       <div class="sd-agent-title">${pill}${esc(title)}</div>
@@ -1283,7 +969,7 @@ function focusAgentTree(agentId) {
 let _nidCounter = 0;
 
 function renderSessionTrees(runData, trees) {
-  const canvasEl = document.getElementById('sd-canvas');
+  const canvasEl = document.getElementById('sd-tree-view');
   const agents = runData.agents || [];
   treeNodeIndex = new Map();
   selectedNodeRow = null;
@@ -1311,7 +997,7 @@ function renderSessionTrees(runData, trees) {
   for (const a of agents) {
     const tree = trees.get(a.agent_id);
     const title = a.title?.trim() || a.description?.trim() || '(untitled)';
-    const pill = a.agent_type ? `<span class="sd-agent-type-pill">${esc(a.agent_type)}</span>` : '';
+    const pill = a.agent_type ? `<span class="sd-agent-type-pill" title="Sub-agent type (the agent definition used for this spawn)">${esc(a.agent_type)}</span>` : '';
     const kindTag = a.is_subagent === 1 ? 'Sub-agent tree' : 'Agent tree';
     html.push(`<section class="tree-agent ${a.is_subagent === 1 ? 'sub' : ''}" id="tree-agent-${esc(a.agent_id)}">`);
     html.push(`<header class="tree-agent-head">
@@ -1385,9 +1071,12 @@ function renderNodeHtml(n, agentId, claimSubagent, depth) {
   }
 
   const parts = [];
+  const iconTitle = n.kind === 'tool'
+    ? ({ mcp: 'MCP tool call', task: 'Sub-agent spawn', skill: 'Skill invocation' }[n.cat] ?? 'Tool call')
+    : (KIND_TITLES[n.kind] ?? n.kind);
   parts.push(`<div class="tnode k-${esc(n.kind)}${catCls}${collapsed && hasKids ? ' collapsed' : ''}">`);
   parts.push(`<div class="tnode-row${statusCls}" data-nid="${nid}">`);
-  parts.push(`<span class="tnode-icon i-${esc(n.cat ?? n.kind)}">${nodeIcon(n)}</span>`);
+  parts.push(`<span class="tnode-icon i-${esc(n.cat ?? n.kind)}" title="${esc(iconTitle)}">${nodeIcon(n)}</span>`);
   parts.push(`<span class="tnode-main">`);
   parts.push(`<span class="tnode-label">${esc(n.label ?? '')}</span>`);
   if (n.sub) parts.push(`<span class="tnode-sub">${esc(n.sub)}</span>`);
@@ -1474,3 +1163,134 @@ document.querySelectorAll('.sd-panel-tab').forEach(btn => {
     else if (btn.dataset.panel === 'agents') body.classList.add('show-agents');
   });
 });
+
+// ===== Run Detail — Usage view (middle-column Tree | Usage tabs) =====
+//
+// Numbers come from /api/run/:id/usage, i.e. the deduplicated turns table —
+// they match the dashboard exactly. Buckets attribute each API call to
+// base / MCP / skills / sub-agents; costs use the configurable pricing table.
+
+let runUsageCache = null; // { runId, report } — one report per open run
+
+const BUCKET_COLOR = { base: '#5f93d1', mcp: '#e3a838', skills: '#5fb98f', subagents: '#a98cd6' };
+const BUCKET_LABEL = { base: 'Base', mcp: 'MCP', skills: 'Skills', subagents: 'Sub-agents' };
+
+const ADVICE_TEXT = {
+  'switch-cheaper-model': p => [
+    `Switching to ${p.model} could save ~$${p.usd}`,
+    `Premium-tier models dominate this run. Re-priced at ${p.model}, the same calls would cost about $${p.usd} (${p.pct}%) less — consider a cheaper model for routine steps. Exact numbers for this run, not an estimate over averages.`,
+  ],
+  'low-cache-hit': p => [
+    `Low cache hit rate (${p.pct}%)`,
+    'Little of the input side was served from prompt cache. Keep system prompts and instruction files stable across turns and avoid long idle gaps so the cache stays warm.',
+  ],
+  'subagents-heavy': p => [
+    `${p.pct}% of tokens burned inside sub-agents`,
+    'Most usage happened inside spawned sub-agents. Check whether some of that work could run inline, or whether the sub-agents could use a cheaper model.',
+  ],
+};
+
+function setRunView(view) {
+  document.querySelectorAll('.sd-view-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.getElementById('sd-tree-view').hidden = view !== 'tree';
+  document.getElementById('sd-usage-view').hidden = view !== 'usage';
+  if (view === 'usage') loadRunUsage();
+}
+document.querySelectorAll('.sd-view-tab').forEach(btn => {
+  btn.addEventListener('click', () => setRunView(btn.dataset.view));
+});
+
+async function loadRunUsage() {
+  const runId = openRunArgs?.[0];
+  if (!runId) return;
+  if (runUsageCache?.runId === runId) return; // already rendered for this run
+  const el = document.getElementById('sd-usage-view');
+  el.innerHTML = '<div class="sd-placeholder text-dim">Loading usage…</div>';
+  try {
+    const report = await api(`/run/${encodeURIComponent(runId)}/usage`);
+    runUsageCache = { runId, report };
+    renderRunUsage(report);
+  } catch (e) {
+    el.innerHTML = `<p class="text-error">${esc(e.message)}</p>`;
+  }
+}
+
+function renderRunUsage(r) {
+  const el = document.getElementById('sd-usage-view');
+  const kpis = [
+    { label: 'Est. cost (API-equiv)', value: `$${r.total.costUsd.toFixed(2)}` },
+    { label: 'Output tokens',         value: fmt.tokens(r.total.output) },
+    { label: 'Cache read',            value: fmt.tokens(r.total.cacheRead) },
+    { label: 'LLM calls',             value: String(r.turnCount) },
+  ];
+
+  const modelRows = r.byModel.map(m => `<tr>
+    <td><code>${esc(m.model.replace(/^claude-/, ''))}</code></td>
+    <td class="td-num">${fmt.tokens(m.input)}</td>
+    <td class="td-num">${fmt.tokens(m.output)}</td>
+    <td class="td-num">${fmt.tokens(m.cacheRead)}</td>
+    <td class="td-num">$${m.costUsd.toFixed(2)}</td>
+  </tr>`).join('');
+
+  const adviceHtml = (r.advice ?? []).map(a => {
+    const t = ADVICE_TEXT[a.id]?.(a.params) ?? [a.id, ''];
+    return `<div class="usage-advice ${a.severity}">
+      <div class="usage-advice-title">${esc(t[0])}</div>
+      <div class="usage-advice-detail text-dim">${esc(t[1])}</div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="usage-kpis">${kpis.map(k => `
+      <div class="usage-kpi"><div class="usage-kpi-label text-dim">${esc(k.label)}</div>
+      <div class="usage-kpi-value">${esc(k.value)}</div></div>`).join('')}
+    </div>
+    <div class="usage-chart-row">
+      <div class="chart-card"><div class="chart-card-title">Cost by bucket</div>
+        <div id="chart-run-bucket" style="height:220px"></div></div>
+      <div class="chart-card"><div class="chart-card-title">Cumulative spend over the run</div>
+        <div id="chart-run-spend" style="height:220px"></div></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-title">By model</div>
+      <table class="usage-model-table">
+        <thead><tr><th>Model</th><th class="td-num">Input</th><th class="td-num">Output</th>
+          <th class="td-num">Cache read</th><th class="td-num">Cost</th></tr></thead>
+        <tbody>${modelRows}</tbody>
+      </table>
+    </div>
+    ${adviceHtml ? `<div class="usage-advice-list">${adviceHtml}</div>` : ''}
+    <p class="text-dim usage-note">${esc(r.note ?? '')}</p>
+  `;
+
+  // Donut: estimated cost per bucket (cost is comparable across buckets;
+  // raw token counts are distorted by cheap cache reads).
+  const pieData = Object.entries(r.byBucket)
+    .filter(([, v]) => v.costUsd > 0)
+    .map(([k, v]) => ({ name: BUCKET_LABEL[k] ?? k, value: +v.costUsd.toFixed(4),
+                        itemStyle: { color: BUCKET_COLOR[k] } }));
+  const pie = initChart('chart-run-bucket');
+  if (pie) {
+    if (!pieData.length) renderChartEmpty(pie, 'No cost recorded');
+    else pie.setOption({ ...baseOption(),
+      tooltip: { trigger: 'item', formatter: p => `${esc(p.name)}: $${p.value} (${p.percent}%)` },
+      legend: { bottom: 0, textStyle: { color: COLOR.dim, fontSize: 11 } },
+      series: [{ type: 'pie', radius: ['42%', '68%'], center: ['50%', '46%'], data: pieData,
+        label: { color: COLOR.dim, fontSize: 11, formatter: p => `${p.name} $${p.value}` } }],
+    });
+  }
+
+  // Cumulative spend curve across API calls, in order.
+  let cum = 0;
+  const pts = r.series.map((p, i) => { cum += p.costUsd; return [i + 1, +cum.toFixed(3)]; });
+  const spend = initChart('chart-run-spend');
+  if (spend) {
+    spend.setOption({ ...baseOption(),
+      tooltip: { trigger: 'axis', formatter: ps => `Call ${ps[0].value[0]}: $${ps[0].value[1]} cumulative` },
+      xAxis: { type: 'value', name: 'call', axisLabel: { color: COLOR.dim }, splitLine: { show: false }, minInterval: 1 },
+      yAxis: { type: 'value', axisLabel: { formatter: v => `$${v}`, color: COLOR.dim }, splitLine: { lineStyle: { color: gridLine() } } },
+      series: [{ type: 'line', data: pts, showSymbol: false, smooth: true,
+        lineStyle: { color: COLOR.purple }, areaStyle: { color: COLOR.purple, opacity: 0.15 } }],
+    });
+  }
+}

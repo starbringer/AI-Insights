@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DB_PATH } from "./paths";
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 let _db: Database | null = null;
 
@@ -101,7 +101,8 @@ function initSchema(db: Database): void {
     cache_read       INTEGER NOT NULL DEFAULT 0,
     output_tokens    INTEGER NOT NULL DEFAULT 0,
     service_tier     TEXT,
-    raw_offset       INTEGER
+    raw_offset       INTEGER,
+    bucket           INTEGER NOT NULL DEFAULT 0
   )`);
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_turns_agent ON turns(agent_id)`);
@@ -113,6 +114,10 @@ function initSchema(db: Database): void {
   // Without this dedupe every token count would be multiplied by the block
   // count (~2.4x observed).
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_msg ON turns(agent_id, message_id)`);
+  // `bucket` classifies each API call for cost attribution (0=base, 1=mcp,
+  // 2=skill; sub-agent turns are attributed by is_subagent instead). Assigned
+  // at parse time from the call's tool_use blocks; conflicts keep the highest
+  // priority seen across the response's lines.
 
   // Lightweight event stream extracted from transcripts: real user prompts,
   // tool calls, hook fires, API errors, compactions, model fallbacks.
