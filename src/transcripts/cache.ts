@@ -28,6 +28,8 @@ export interface TurnRecord {
   output_tokens: number;
   service_tier: string | null;
   raw_offset: number | null;
+  /** Cost-attribution bucket: 0 = base, 1 = mcp, 2 = skill (see db.ts). */
+  bucket: number;
 }
 
 export interface AgentRecord {
@@ -92,8 +94,8 @@ export function insertTurn(db: Database, t: TurnRecord): void {
     `INSERT INTO turns
        (provider,agent_id,run_id,is_subagent,parent_agent_id,message_id,request_id,ts,model,
         input_tokens,cache_create_5m,cache_create_1h,cache_read,
-        output_tokens,service_tier,raw_offset)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        output_tokens,service_tier,raw_offset,bucket)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(agent_id, message_id) DO UPDATE SET
        ts=excluded.ts,
        model=excluded.model,
@@ -102,10 +104,11 @@ export function insertTurn(db: Database, t: TurnRecord): void {
        cache_create_1h=excluded.cache_create_1h,
        cache_read=excluded.cache_read,
        output_tokens=excluded.output_tokens,
-       service_tier=excluded.service_tier`,
+       service_tier=excluded.service_tier,
+       bucket=MAX(bucket, excluded.bucket)`,
     [t.provider, t.agent_id, t.run_id, t.is_subagent, t.parent_agent_id, t.message_id, t.request_id,
      t.ts, t.model, t.input_tokens, t.cache_create_5m, t.cache_create_1h, t.cache_read,
-     t.output_tokens, t.service_tier, t.raw_offset]
+     t.output_tokens, t.service_tier, t.raw_offset, t.bucket]
   );
 }
 

@@ -5,170 +5,300 @@
 
 A local web app that turns raw LLM usage data into a live dashboard — token counts, costs, session history, and configuration health.
 
-Today it parses **Claude Code's JSONL transcripts**. The architecture is intentionally provider-agnostic so additional sources (Gemini, ChatGPT exports, local Ollama, etc.) can be plugged in over time.
+Today it parses **Claude Code's JSONL transcripts**. The architecture is provider-agnostic, so other sources can be plugged in over time.
 
 **No AI calls. No external services. All data stays on your machine.**
+
+![Dashboard](docs/screenshots/01-dashboard.png)
+
+---
 
 ## Requirements
 
 - [Bun](https://bun.sh) ≥ 1.1 (tested on 1.3.13)
-- **Windows, macOS, or Linux.** Transcript parsing and the dashboard are cross-platform. Only the auto-open-browser step is Windows-specific (it shells out to `cmd /c start`); on macOS/Linux the server runs the same, you just open the URL yourself.
-- At least one supported data source:
-  - **Claude Code** with data in `~/.claude/projects/` *(currently the only built-in source)*
+- **Windows, macOS, or Linux.** Only the auto-open-browser step is Windows-specific (it shells out to `cmd /c start`); everywhere else the server runs the same, you just open the URL yourself.
+- At least one supported data source — **Claude Code**, with data in `~/.claude/projects/` *(currently the only built-in source)*
 
-## Quick Start
+## Setup
+
+### 1. Install Bun
 
 ```bash
-# Install dependencies (first time only)
-bun install
+# macOS / Linux
+curl -fsSL https://bun.sh/install | bash
 
-# Start the server (opens browser automatically)
-bun run server.ts
+# Windows (PowerShell)
+powershell -c "irm bun.sh/install.ps1 | iex"
 ```
 
-Then open http://localhost:5757 if the browser doesn't open automatically.
+Check it: `bun --version`
 
-## CLI Flags
+### 2. Get the code
+
+```bash
+git clone https://github.com/starbringer/llm-usage.git
+cd llm-usage
+```
+
+### 3. Install dependencies
+
+```bash
+bun install
+```
+
+### 4. Start the app
+
+```bash
+bun run start
+```
+
+### 5. Open it
+
+The browser opens automatically on Windows. Otherwise go to **http://localhost:5757**.
+
+On first start the app scans every transcript under `~/.claude/projects/`, builds
+`data/cache.db`, and then watches those files — new activity shows up within a
+couple of seconds, no restart needed. A large history takes a few seconds to scan;
+the page is usable as soon as the first pass finishes.
+
+If you have no data yet, the app still loads and tells you where it expected to
+find it.
+
+### Command-line options
+
+```bash
+bun run server.ts --port=8080 --no-browser
+```
 
 | Flag | Description |
 |------|-------------|
-| `--port=N` | Listen on port N (default: 5757) |
+| `--port=N` | Listen on port N (default: `5757`) |
+| `--host=H` | Bind address (default: `127.0.0.1`) — the config API can edit files, so it stays loopback-only unless you opt in to `0.0.0.0`. [Why](docs/architecture.md#network-binding) |
 | `--no-browser` | Don't auto-open the browser |
-| `--static-only` | Skip file watcher; serve static files and existing DB only |
+| `--static-only` | Skip the file watcher (and the browser) — the startup scan still runs, but changes afterwards aren't picked up until restart |
 
-Environment variable `PORT` is also respected.
+The environment variables `PORT` and `HOST` work too.
 
-## Scripts
+### Scripts
 
 ```bash
-bun run start        # same as bun run server.ts
+bun run start        # start the server (same as bun run server.ts)
 bun run dev          # hot-reload with --watch
-bun run typecheck    # tsc --noEmit (zero-error check)
-bun run test         # run the unit test suite (bun test)
+bun run typecheck    # tsc --noEmit
+bun run test         # unit test suite
 bun run build        # compile to dist/llm-usage.exe (Windows x64)
 ```
 
-## Interface
+### Rebuilding the cache
 
-The UI is a **neomorphic / soft-UI** design — tactile minimal cards built from soft dual shadows, a warm amber accent, and a left sidebar for navigation. A **light** (warm cream) and **dark** (slate) theme are both included; toggle them with the **Theme** control at the bottom of the sidebar. The choice is persisted to `localStorage` and charts re-theme in place.
+The database is a cache — the JSONL transcripts are the only source of truth.
+Delete `data/cache.db` and restart to force a clean re-parse. The app does this by
+itself whenever the schema version changes after an update.
 
-## Concepts: Run / Agent / Turn
+### Standalone executable
 
-The app organizes recorded activity into three nested levels:
-
-- **Run** — one logical execution (one AI session). May contain one or many agents. For a plain chat (no sub-agents) a run holds exactly one agent. For something like an orchestrator that spawns multiple Task sub-agents, the run holds the parent plus all descendants linked through the provider's native parent/child markers.
-- **Agent** — one conversation context. Maps to a single transcript file (one `.jsonl` for Claude Code). An agent has a model, a cwd, a title, and a list of turns.
-- **Turn** — one **API call** (one LLM request/response). Claude Code writes one JSONL line per content block of a response, each repeating the same usage numbers — turns are deduplicated by the response's `message.id`, so token totals count each API call exactly once. Failed calls echoed with model `<synthetic>` are excluded from counts and the model list (they surface in the session tree as error nodes instead).
-
-Sub-agents are detected from the provider's own data — for Claude Code that's the `<parent>/subagents/agent-*.jsonl` directory convention. No heuristics or content sniffing. If a provider's framework doesn't record parent/child links between separate transcript files, each transcript becomes a one-agent run; this is correct behavior, not a limitation.
-
-### Accuracy notes
-
-- **Token dedupe:** without `message.id` dedupe, real transcripts over-count output tokens ~2.4× (each multi-block response is written as several lines). All totals, charts, and cost estimates use the deduped numbers.
-- **Day boundaries:** "Today" / daily buckets use your local calendar day, not UTC.
-- **Titles:** a run is titled by the transcript's `ai-title` record (Claude Code's own AI-generated session title) when present; otherwise by the first real user prompt with IDE/framework wrapper tags stripped.
-- **Cache write TTL:** the 5m/1h split comes from `usage.cache_creation`; legacy records with only a total are attributed to the 5m bucket (the default TTL) so cost is not overstated.
-
-## What It Shows
-
-### Dashboard
-- 5 KPI cards: today, 7-day, 30-day totals (each with API-equiv cost), cache hit rate, **active runs**
-- Token trend chart (stacked: input / output / cache write / cache read)
-- Token usage by model — stacked horizontal bar
-- Top projects by tokens — horizontal bar (with run + agent counts)
-- **MCP token usage** — estimated tokens flowing through each MCP server's tool calls (input arguments + returned results, ~4 chars/token), with a per-tool breakdown in the tooltip
-- **Skill token usage** — estimated tokens per skill invocation (arguments + the injected skill content)
-- **Top 10 runs by tokens** — stacked horizontal bar; click a bar to open that run's detail page
-
-Every token chart has its own **time-range switcher** — `1h` / `24h` / `7d` / `30d` (last 1 hour, 24 hours, 7 days, 30 days). Buckets adapt to the range: 5-minute slices for 1h, hourly for 24h, daily otherwise. Each chart remembers its selection (`localStorage`).
-
-### Audit
-Data-driven findings about your Claude Code configuration:
-
-| Finding | Metric |
-|---------|--------|
-| CLAUDE.md size | Global **and per-project** CLAUDE.md files (projects discovered from your transcripts, case-deduped), word/token counts, injected tokens per day = global size × agents active that day |
-| Hook volume | Hook entries from settings.json/.claude.json (with matchers) × **recorded** fires from the transcript event stream: real prompt counts for UserPromptSubmit, real Stop-hook fires, Pre/PostToolUse counted against the entry's matcher regex over actual tool calls |
-| MCP servers | All servers enumerated **directly from config files** — `~/.claude.json` (user + local scope), each project's `.mcp.json` (project scope), and claude.ai-hosted connector names — never from `claude mcp list` (see below). Tool lists and input schemas come from live probes (JSON-RPC over stdio, streamable HTTP for remote servers); **click a server row to expand its tools, per-tool token counts, descriptions, and JSON schemas**. Shows schema tokens per server + estimated 30-day injection cost. Enumeration/probe failures surface in a **diagnostics** panel instead of silently emptying the list |
-| Cache efficiency | Hit rate over time (line chart + gauge) |
-| Skills | Installed skills list with SKILL.md token count (per-invocation cost) |
-| Settings | Default model + effort level, permission allow/deny rule counts, auto-approve warning |
-| Plugins | Installed plugins list |
-| Model mix | Token share per model (last 30 days) |
-
-Each finding has a configurable threshold (warn/error) you can adjust in the Settings tab.
-
-**Why MCP servers are read from config files, not the CLI:** earlier versions shelled out to `claude mcp list` and parsed its human-readable output. That broke repeatedly without any code change — the CLI health-checks every server before printing (so a slow server or cold network blanked the whole list past the spawn timeout), and its output format drifts between CLI versions. The audit now reads the same files the CLI itself reads (`~/.claude.json`, `.mcp.json`), which is deterministic and instant; only the optional tool/schema probes touch the servers, their results are cached for 10 minutes per config definition, and any failure is reported in the card's diagnostics section.
-
-**Probe consent:** project-scope servers ship inside the repo's `.mcp.json` (third-party content), and Claude Code only runs them after you approve them per project. The audit mirrors that: unapproved or disabled project servers are *listed* with their scope but never executed or contacted — their row explains why no tool data is shown. claude.ai-hosted connectors are listed by name only (their definitions live in your account, not on disk).
-
-### Runs
-Paginated table of all runs with title, project, **agent count** (× N badge when > 1), turn count, token totals, and last-active time. Supports search and project filter.
-
-**Run Detail — Session Trees** — Click **View** on any run (or open `#run=<run_id>` directly) to open a full-screen three-panel layout. Press **← Runs** or Escape to return.
-
-The middle canvas renders the whole session as **one tree per agent, all stacked in the same scrollable view**: the main agent's tree first, then each sub-agent's own tree below it. Within a tree:
-
-- The **spine** (top level) is the chronological flow of the conversation: user prompts → LLM calls → hook fires → compactions → errors, connected by a vertical thread.
-- Each **LLM call** node shows the model, output/cache-read tokens, and expands into its children: interleaved **thinking**, **text output**, and every **tool call** in order — plain tools ⚙, **MCP calls** ⇄, **sub-agent spawns** ◈ (with a `tree ↓` jump link to that sub-agent's tree), and **skill invocations** ❖ with the injected skill content nested beneath.
-- Tool nodes carry their **result inline** (✓/✗ + preview); the full input/result opens in the right panel.
-- **Framework events** are first-class nodes: `⚡` hook fires (command + duration, flags blocked continuations), `✕` API errors and rate-limit retries, `▣` context compactions (pre → post token counts), `⤷` model refusal fallbacks (original → fallback model), `✚` injected context (todo reminders, IDE state, deferred tool loads…).
-- **Branches** in the transcript DAG (prompt edits, retries, rewinds) render as collapsed `⎇ Abandoned branch` sub-trees — the mainline follows the path the session actually continued on.
-
-Panels: **left** — agents in the session (click to scroll to that agent's tree); **right** — full detail for the selected node (complete prompt/output text, tool input & result, usage chips, hook/error metadata). The top bar shows session totals: prompts, LLM calls, tools, MCP, sub-agents, hooks, errors, compactions, branches.
-
-On mobile (≤ 900 px) the detail panel hides and toggles in via a top-bar tab; on ≤ 640 px the agents panel also toggles.
-
-### Settings
-- Edit warning/error thresholds for all audit metrics
-- Edit per-model pricing (input/output/cache tokens per million)
-
-## Data Sources
-
-The top bar has a **Source ▾** switcher that lists every registered provider. The active selection is persisted to `localStorage`. On first launch the app picks the first provider that has data; if none do, the app still loads and shows a "No usage data detected" banner with the expected data location.
-
-Providers are self-contained adapters under [`src/providers/<id>/`](src/providers/). The shared interface is defined in [`src/providers/types.ts`](src/providers/types.ts):
-
-```ts
-export interface Provider {
-  id: string;
-  label: string;
-  description: string;
-  dataDir: string;
-  hasData(): boolean;
-  watchGlobs(): string[];                   // patterns the watcher should mind
-  fileMatches(path: string): boolean;       // does this path belong to this provider?
-  scanAll(db): void;                        // startup full scan
-  ingestFile(db, path): void;               // incremental update for one file + refresh derived roll-ups
-  loadAgentDetail(agentId): NormalizedTurn[];  // detail page rows
-}
+```bash
+bun run build        # → dist/llm-usage.exe (~60MB, no Bun install needed)
 ```
 
-The registry in [`src/providers/index.ts`](src/providers/index.ts) lists every provider, and `providerForPath(path)` dispatches changed files to the right one. `GET /api/providers` exposes the list to the UI together with a `hasData` flag (computed at request time).
+The binary embeds the Bun runtime; ship the `static/` folder alongside it. The
+`build` script targets Windows x64 — on macOS/Linux either run from source or
+retarget: `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/llm-usage`.
 
-### Claude Code (current)
+---
 
-Lives in [`src/providers/claude-code/`](src/providers/claude-code/). The adapter reads `~/.claude/projects/**/*.jsonl` — Claude Code's local transcript files — and emits normalized turns plus a full session tree for the detail page. The Claude Code-specific conventions it recognizes:
-- **Multi-line responses**: one API response spans several `assistant` lines (one per content block) sharing `message.id` — grouped into a single turn
-- **`<synthetic>` error echoes** (`isApiErrorMessage`) — excluded from usage, shown as error nodes in the tree
-- **`system` lines**: `stop_hook_summary` (hook fires), `api_error` (retries), `compact_boundary` (context compaction, re-linked through `logicalParentUuid`), `model_refusal_fallback`, `turn_duration`
-- **`attachment` lines** (todo reminders, deferred tool loads, IDE state, …) — shown as injected-context nodes
-- **`ai-title` lines** — preferred source for run titles
-- **uuid/parentUuid branching** (prompt edits, retries) — mainline resolved as the path with the latest descendant; side paths become branch sub-trees
-- **Sub-agent transcripts** at `<parent-agent-id>/subagents/agent-*.jsonl` (Task-spawned children) and in-file sidechains (`isSidechain`)
-- The `sourceToolUseID` field linking injected content (skill bodies) back to the tool call that produced it
+## Features
 
-No API keys are needed; all parsing is local.
+*Screenshots below are captured from real usage with every project name, path,
+conversation and configuration name replaced by consistent stand-ins — see
+[docs/screenshots/](docs/screenshots/).*
 
-### Adding a new provider (Gemini / ChatGPT / Ollama / …)
+### Dashboard
 
-1. Create `src/providers/<id>/index.ts` exporting an object that implements the `Provider` interface from [`src/providers/types.ts`](src/providers/types.ts).
-2. Inside that folder, write a parser that walks `dataDir` and upserts rows via the helpers in [`src/transcripts/cache.ts`](src/transcripts/cache.ts), and a detail loader that returns `NormalizedTurn[]`.
-3. Append your provider object to the `PROVIDERS` array in [`src/providers/index.ts`](src/providers/index.ts).
+Five KPI cards (today / 7-day / 30-day totals with API-equivalent cost, cache hit
+rate, active runs) over a token trend chart split into input, output, cache write
+and cache read.
 
-The watcher, aggregations, audit, pricing, and UI are all provider-agnostic — they only operate on rows in the SQLite tables and `NormalizedTurn` objects. Pricing keys off the model name, so as long as your turns include a recognizable model string, costs work out of the box.
+Below it: usage by model, top projects, **MCP token usage** (tokens flowing through
+each server's tool calls, with a per-tool tooltip), **skill token usage**, the daily
+**cache hit rate** with a 50% guide line, the 30-day **model mix**, and **top 10 runs**
+— click any bar to jump straight into that run.
 
-Token estimation for prompt injection cost (CLAUDE.md, hooks, MCP schemas) uses `js-tiktoken` with `cl100k_base` encoding, which runs locally in WASM.
+![Dashboard charts](docs/screenshots/02-dashboard-charts.png)
+
+Every token chart has its own range switcher — `1h` / `24h` / `7d` / `30d` — and
+remembers your choice. Costs are API-equivalent reference numbers from an editable
+pricing table, not billing; [details](docs/data-model.md#cost-estimation).
+
+### Runs
+
+Every recorded session with title, project, agent count (`× N` when a run spawned
+sub-agents), turns, token totals and last-active time. Searchable and filterable by
+project.
+
+![Runs](docs/screenshots/03-runs.png)
+
+A **run** is one logical session, which contains one or more **agents** (one
+transcript each), which contain **turns** (one API call each).
+[More on the model](docs/data-model.md#run--agent--turn).
+
+### Run detail — session tree
+
+Click **View** on any run for a three-panel replay of the whole session: agents on
+the left, the tree in the middle, full node detail on the right.
+
+![Run detail — session tree](docs/screenshots/04-run-detail-tree.png)
+
+Each agent gets its own tree, stacked in one scrollable view. The spine is the
+chronological flow — prompts, LLM calls, hook fires, compactions, errors — and each
+LLM call expands into its thinking, text output and every tool call in order: plain
+tools ⚙, MCP calls ⇄, sub-agent spawns ◈ (with a `tree ↓` jump link), skill
+invocations ❖ with the injected skill body nested underneath. Framework events are
+first-class nodes: `⚡` hooks with command and duration, `✕` API errors and
+rate-limit retries, `▣` compactions with pre → post token counts, `⤷` model refusal
+fallbacks, `✚` injected context. Abandoned branches from prompt edits and retries
+collapse into `⎇` sub-trees so the mainline stays readable.
+
+The top bar totals the session: prompts, LLM calls, tools, MCP, sub-agents, hooks,
+errors, compactions, branches. On narrow screens the side panels collapse into
+top-bar toggles.
+
+### Run detail — usage
+
+The middle column's second tab is a cost breakdown for that one run, computed from
+the same deduplicated data as the dashboard.
+
+![Run detail — usage](docs/screenshots/05-run-detail-usage.png)
+
+KPI cards, a **cost-by-bucket donut** (base / MCP / skills / sub-agents — every API
+call is classified at parse time from its tool calls), a cumulative spend curve, a
+per-model table, and **tuning advice** derived from this run's real numbers, e.g.
+"re-priced at a cheaper model these calls would cost $X (Y%) less", low cache-hit
+warnings, or sub-agent-heavy runs.
+
+### Harness
+
+The **Harness** group inspects — and where safe, edits — the configuration of the
+active tool. Each tab appears only if the active provider supports that capability,
+so a future adapter for another tool simply shows fewer tabs.
+
+#### CLAUDE.md
+
+Every instruction file the tool injects: the global `~/.claude/CLAUDE.md` plus
+`CLAUDE.md` / `.claude/CLAUDE.md` for every project your transcripts have touched
+(missing ones are listed as creatable). Per-file token and word counts, an inline
+editor with **Save**, and a timeline of injected tokens per day.
+
+![CLAUDE.md](docs/screenshots/06-claudemd.png)
+
+#### Commands
+
+Slash commands from all three sources — user, project and enabled plugins — with
+`:`-namespacing, argument hints, `$ARGUMENTS` detection, token cost, search, and
+**same-name override detection** so you can see which definition actually wins.
+Edit, create and delete user/project commands; plugin commands are read-only.
+
+![Commands](docs/screenshots/07-commands.png)
+
+#### Skills
+
+A narrow list on the left, full detail on the right: override detection, SKILL.md
+token cost, `references/` and `scripts/` listings, **recorded** invocations and
+injected tokens over 30 days, and a **trigger analyzer** showing which prompt
+keywords would activate the skill.
+
+![Skills](docs/screenshots/08-skills.png)
+
+#### Hooks
+
+Every hook across every settings layer, with its matcher, action type and
+**recorded fire count** for the last 30 days — recorded from the event stream, not
+estimated.
+
+![Hooks](docs/screenshots/09-hooks.png)
+
+Actions that run a script file (`.ps1`, `.sh`, `.py`, …) are resolved on disk:
+click one to read the script, edit it and save. Hooks can also be removed — the
+entry is deleted from its settings file, and the script itself is left on disk.
+
+![Hook script editor](docs/screenshots/10-hooks-script.png)
+
+#### MCP
+
+Servers with scope, transport and tool count on the left; command, source file,
+probe status, 30-day injection estimate and expandable tools with descriptions and
+JSON schemas on the right. Diagnostics live in the default panel and a re-probe
+button bypasses the 10-minute cache.
+
+![MCP](docs/screenshots/11-mcp.png)
+
+Servers are enumerated from config files rather than the CLI, and project-scope
+servers you haven't approved are listed but never executed —
+[why](docs/architecture.md#mcp-why-config-files-not-the-cli).
+
+#### Permissions
+
+`allow` / `deny` / `ask` rules parsed into tool + specifier across the user layer
+and, via the project selector, a project's settings and local settings. Shows the
+merged effective set; a rule shadowed by a higher-priority layer is struck through.
+
+![Permissions](docs/screenshots/12-permissions.png)
+
+#### Memory
+
+Per-project persistent memory stores: the MEMORY.md index, every topic file with
+its content, size and last-modified time, and an **orphan** badge for files that
+exist but aren't linked from the index.
+
+![Memory](docs/screenshots/13-memory.png)
+
+#### Workflow
+
+Dependency analysis across skills, hooks, MCP servers and commands. The left column
+lists detected **workflows** — connected components ordered hook → MCP → skill →
+command — and selecting one renders just that workflow's graph with labelled edges
+(solid = one component references another by name in its content, dashed = keyword
+similarity) plus its numbered steps.
+
+![Workflow](docs/screenshots/14-workflow.png)
+
+#### Configs
+
+A read-only merged view of the settings layers: headline cards for the **default
+model** and its source layer, effort level, and the most-used model of the last 7
+days from your actual transcripts. Below, every key's winning value, which layers
+it overrides, and warnings for keys set in a layer the tool never reads.
+
+![Effective Configs](docs/screenshots/15-configs.png)
+
+### Settings
+
+Warning thresholds used by the audit API, and the per-model reference pricing that
+drives every cost number in the app.
+
+![Settings](docs/screenshots/16-settings.png)
+
+### Themes and data sources
+
+Light (warm cream) and dark (slate) themes, toggled with the sun/moon button in the
+top-right corner; the choice persists and charts re-theme in place.
+
+![Dark theme](docs/screenshots/17-dashboard-dark.png)
+
+The **Source ▾** switcher in the top bar lists every registered provider and marks
+which ones have data. On first launch the app picks the first provider that has
+data.
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | The two provider seams, the Claude Code adapter, how to add a new tool, MCP probing, write safety, network binding |
+| [docs/data-model.md](docs/data-model.md) | Run / agent / turn, accuracy and dedupe notes, database schema, cost estimation |
+| [docs/api.md](docs/api.md) | Every HTTP endpoint |
+| [docs/screenshots/](docs/screenshots/) | All UI screenshots and how they were anonymized |
 
 ## Project Structure
 
@@ -185,62 +315,54 @@ src/
     index.ts               Provider registry, providerForPath / providerById lookups
     claude-code/           Self-contained Claude Code adapter
       index.ts             Exports the claudeCodeProvider object
-      parser.ts            Incremental JSONL parsing, message.id dedupe, sub-agent meta.json
-      agentDetail.ts       Reads a JSONL and emits NormalizedTurn[] (no length truncation)
+      parser.ts            Incremental JSONL parsing, message.id dedupe, bucket classification
+      agentDetail.ts       Reads a JSONL and emits NormalizedTurn[]
       agentTree.ts         Folds the transcript DAG into render-ready session trees
       titles.ts            Agent title extraction (wrapper-tag stripping)
+      config/              Claude Code's ToolConfigAdapter (Harness tabs)
+        index.ts           Assembles the adapter + capability flags
+        shared.ts          Project discovery, plugin enumeration, override ranking
+        instructions.ts    CLAUDE.md enumeration + whitelisted read/write + injection series
+        commands.ts        Three-source command scan, namespacing, create/edit/delete
+        skills.ts          Three-source skill scan, trigger analysis, recorded usage
+        hooks.ts           Hooks across settings layers, script resolution, fire counts
+        permissions.ts     Rule parsing + layer merge + override marking
+        memory.ts          Per-project memory stores (MEMORY.md index + topics)
+        effective.ts       Merged settings layers with layer-restriction warnings
+  config/
+    types.ts               ToolConfigAdapter interface + neutral config shapes
+    index.ts               Config-adapter registry (parallel to the provider registry)
+    graph.ts               Provider-agnostic dependency graph builder
   transcripts/
     cache.ts               Generic SQLite read/write helpers (provider-agnostic)
     aggregate.ts           SQL aggregation queries (totals, series, agents, models, projects)
-    runs.ts                Derived roll-up: run-id resolution (parent-chain walk), agent activity recompute (turn count + last-seen), refreshRuns; listRuns, loadRun, getTopRuns
+    runs.ts                Run-id resolution, activity recompute, run listing/loading
+    usageReport.ts         Per-run usage breakdown (buckets, per-model costs, advice)
   audit/
     claudeMd.ts            CLAUDE.md size audit
     hooks.ts               Settings.json hooks audit
-    mcp.ts                 MCP audit: config-file enumeration (user/local/project/claude.ai scopes) + tool/schema probes (stdio JSON-RPC, streamable HTTP) + diagnostics
+    mcp.ts                 MCP enumeration + tool/schema probes + diagnostics
     plugins.ts             Plugin list audit
     skills.ts              Skills directory audit
     settings.ts            Model + permissions audit
     index.ts               Orchestrator with 60s cache
   watcher.ts               chokidar watcher → dispatches changes to the owning provider
   api/
-    auditEndpoints.ts      GET/POST /api/audit, GET/PUT /api/thresholds, pricing
-    transcriptEndpoints.ts /api/stats, /api/timeseries, /api/models, /api/projects, /api/runs, /api/run/:id, /api/agents, /api/agent/:id (flat turns), /api/agent/:id/tree (session tree), /api/top-runs, /api/top-turns, /api/mcp-usage, /api/skill-usage (timeseries/models/projects/top-runs/mcp-usage/skill-usage all accept ?range=1h|24h|7d|30d)
+    auditEndpoints.ts      Audit report, thresholds, pricing
+    transcriptEndpoints.ts Usage data: stats, timeseries, runs, agents, trees, usage reports
+    configEndpoints.ts     /api/config/* — the Harness tabs
     providersEndpoint.ts   GET /api/providers
 static/
-  index.html               Sidebar SPA shell (4 tabs + session-detail overlay)
+  index.html               Sidebar SPA shell (12 tabs + session-detail overlay)
   style.css                Neomorphic soft-UI theme — light + dark, CSS variables
-  app.js                   Vanilla JS: fetch, ECharts, theme toggle, session-tree renderer
+  config.css               Styles for the Harness tabs + run Usage view
+  app.js                   Fetch, ECharts, theme toggle, session-tree renderer, run Usage view
+  config.js                Harness tabs (claudemd/commands/skills/hooks/mcp/permissions/memory/workflow/configs)
   lib/
     echarts.min.js         Apache ECharts 5.5.1 (offline, 1007KB)
+docs/                      Architecture, data model, API reference, screenshots
 data/                      SQLite DB lives here (git-ignored)
 ```
-
-## Database
-
-SQLite at `data/cache.db` (WAL mode). Five tables, all carrying a `provider` column for future multi-source support:
-
-- **`files`** — tracks each transcript file path + byte offset for incremental parsing.
-- **`runs`** — derived roll-up, one row per logical run: title, cwd, agent count, turn count, first/last seen. Rebuilt from `agents`/`turns` after every full scan **and** after every incremental ingest (debounced), so the Runs page stays live without a restart.
-- **`agents`** — one row per agent (one transcript file). Carries `run_id`, `parent_agent_id`, `parent_turn_index` (for ordering siblings), `agent_type`, `description` (from sub-agent `meta.json` when present), title, cwd, last seen, turn count.
-- **`turns`** — one row per API call, **unique on (agent_id, message_id)**: agent_id, run_id, message_id, request_id, model, token counts, timestamp. The unique index is what deduplicates Claude Code's one-line-per-content-block format. Source of truth for token totals, turn counts, and last-seen times — all recomputed from here, never trusted from a maintained counter (incremental parsing of timestamp-less trailing records like `ai-title`/`mode`/`summary` would otherwise zero out turn counts or null out `last_seen_at`).
-- **`events`** — lightweight event stream extracted during parsing, idempotent on (agent_id, source uuid): real user prompts, tool calls (with tool name), hook fires, API errors, compactions, model fallbacks. Tool events additionally carry the provider's `tool_use_id`, an estimated token size (input arguments + tool result, ~4 chars/token; for Skill calls also the injected skill content), and the skill name for Skill invocations. Powers the audit page's recorded (not estimated) counts and the dashboard's MCP/skill usage charts.
-
-The schema is versioned (`PRAGMA user_version`). When the app starts and finds a different version it drops and recreates everything, then re-parses every transcript. You can also delete `data/cache.db` at any time to force a full rebuild.
-
-## Subscription Usage
-
-The app only tracks **API token usage** recorded in JSONL transcripts. It does not show Pro/Max subscription seat usage — Anthropic provides no programmatic API for that. Check https://claude.ai/settings/usage directly.
-
-## Building a Standalone Executable
-
-```bash
-bun run build
-# produces dist/llm-usage.exe (Windows x64, ~60MB, no Bun install needed)
-```
-
-The compiled binary embeds the Bun runtime. Static files in `static/` must be distributed alongside it.
-
-The `build` script targets Windows x64. On macOS/Linux, run from source with `bun run server.ts`, or retarget the compile with `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/llm-usage`.
 
 ## License
 

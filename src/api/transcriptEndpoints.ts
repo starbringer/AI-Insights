@@ -6,6 +6,7 @@ import {
   parseRange, rangeSinceIso, getRangeSeries, getMcpUsage, getSkillUsage,
 } from "../transcripts/aggregate";
 import { listRuns, loadRun, getTopRuns, getActiveRuns } from "../transcripts/runs";
+import { getRunUsage } from "../transcripts/usageReport";
 import { PROVIDERS } from "../providers";
 
 export const transcriptRouter = new Hono();
@@ -57,6 +58,13 @@ transcriptRouter.get("/run/:runId", c => {
   const detail = loadRun(db, runId);
   if (!detail) return c.json({ error: "not found" }, 404);
   return c.json(detail);
+});
+
+transcriptRouter.get("/run/:runId/usage", c => {
+  const db = getDb();
+  const report = getRunUsage(db, c.req.param("runId"));
+  if (!report) return c.json({ error: "not found" }, 404);
+  return c.json(report);
 });
 
 transcriptRouter.get("/projects", c => {
