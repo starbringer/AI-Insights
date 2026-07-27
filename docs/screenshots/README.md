@@ -1,5 +1,7 @@
 # Screenshots
 
+**English** | [简体中文](README.zh-CN.md)
+
 Every page of the app, captured at 1500×980 (2× device pixel ratio).
 
 **All data shown is pseudonymized.** The capture harness intercepts every `/api/*`

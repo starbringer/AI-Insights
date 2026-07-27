@@ -1,5 +1,7 @@
 # Architecture
 
+**English** | [简体中文](architecture.zh-CN.md)
+
 How the app is put together, and where to plug in a new AI tool.
 
 - [Two provider seams](#two-provider-seams)

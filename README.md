@@ -1,5 +1,7 @@
 # AI Insights
 
+**English** | [简体中文](README.zh-CN.md)
+
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-yellow)](https://buymeacoffee.com/starbringer)
 

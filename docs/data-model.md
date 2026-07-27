@@ -1,5 +1,7 @@
 # Data model
 
+**English** | [简体中文](data-model.zh-CN.md)
+
 - [Run / Agent / Turn](#run--agent--turn)
 - [Accuracy notes](#accuracy-notes)
 - [Database](#database)

@@ -1,5 +1,7 @@
 # HTTP API
 
+**English** | [简体中文](api.zh-CN.md)
+
 Everything the UI does goes through these routes, so they double as a local API for
 scripts. The server is loopback-only by default (see
 [architecture › network binding](architecture.md#network-binding)).
