@@ -20,7 +20,7 @@
 ## 环境要求
 
 - [Bun](https://bun.sh) ≥ 1.1（在 1.3.13 上测试通过）
-- **Windows、macOS 或 Linux。** 只有"自动打开浏览器"这一步是 Windows 专用的（它调用 `cmd /c start`）；其他平台服务端行为完全相同，只需自己打开地址。
+- **Windows、macOS 或 Linux。** 各平台服务端行为完全相同；"自动打开浏览器"会按平台选择对应命令（macOS 用 `open`，Windows 用 `cmd /c start`，其他系统用 `xdg-open`），命令不存在时会静默跳过。
 - 至少一个受支持的数据源 —— **Claude Code**，数据位于 `~/.claude/projects/`（*目前唯一内置的数据源*）
 
 ## 安装与启动
@@ -58,7 +58,7 @@ bun run start
 
 ### 5. 打开页面
 
-在 Windows 上浏览器会自动打开；其他平台请访问 **http://localhost:5757**。
+在 Windows、macOS 和 Linux（需有 `xdg-open`）上浏览器会自动打开；否则请手动访问 **http://localhost:5757**。
 
 首次启动时，应用会扫描 `~/.claude/projects/` 下的所有转录文件，构建
 `data/cache.db`，随后持续监听这些文件 —— 新产生的活动会在几秒内出现，无需重启。
@@ -88,7 +88,7 @@ bun run start        # 启动服务（等价于 bun run server.ts）
 bun run dev          # --watch 热重载
 bun run typecheck    # tsc --noEmit
 bun run test         # 单元测试
-bun run build        # 编译为 dist/ai-insights.exe（Windows x64）
+bun run build        # 编译当前平台的独立可执行文件
 ```
 
 ### 重建缓存
@@ -100,12 +100,15 @@ bun run build        # 编译为 dist/ai-insights.exe（Windows x64）
 ### 独立可执行文件
 
 ```bash
-bun run build        # → dist/ai-insights.exe（约 60MB，无需安装 Bun）
+bun run build        # → dist/ai-insights（Windows 上为 dist/ai-insights.exe），约 60MB，无需安装 Bun
 ```
 
-该二进制内嵌了 Bun 运行时；分发时请把 `static/` 目录一并附上。`build` 脚本面向
-Windows x64 —— 在 macOS/Linux 上可以直接跑源码，或改用目标平台：
-`bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/ai-insights`。
+该二进制内嵌了 Bun 运行时；分发时请把 `static/` 目录一并附上。`static/` 与 `data/`
+缓存都相对可执行文件定位，因此可以在任意工作目录下启动。
+
+`build` 默认编译当前运行平台。需要交叉编译时加上目标平台：
+`bun build --compile --target=bun-<windows|darwin|linux>-x64 server.ts --outfile dist/ai-insights`
+（Apple Silicon 用 `bun-darwin-arm64`）。
 
 ---
 

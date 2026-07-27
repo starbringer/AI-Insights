@@ -1,14 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { CLAUDE_DIR, SETTINGS_PATH } from "../../../paths";
+import { CLAUDE_DIR, SETTINGS_PATH, pathKey } from "../../../paths";
 
 const PROVIDER_ID = "claude-code";
 
-/** Case-fold path keys on Windows so differently-cased duplicates collapse. */
-export function pathKey(p: string): string {
-  return process.platform === "win32" ? p.toLowerCase() : p;
-}
+// Re-exported so the config modules can keep importing it from here.
+export { pathKey };
 
 /**
  * Projects this tool has actually touched — distinct cwd of recorded agents.

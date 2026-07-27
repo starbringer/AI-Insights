@@ -223,8 +223,8 @@ function enumerateServers(diagnostics: string[]): EnumeratedServer[] {
 
   // Local scope + project scope: keyed by the project dirs Claude Code has
   // seen. Windows records the same dir with varying case, so case-fold there to
-  // dedupe; on case-sensitive filesystems (macOS/Linux) key verbatim, or
-  // distinct dirs collapse and their local/project servers get dropped.
+  // dedupe; elsewhere key verbatim, since paths differing only in case can be
+  // genuinely distinct dirs whose local/project servers would get dropped.
   const seenDirs = new Set<string>();
   for (const [dir, proj] of Object.entries(claudeJson?.projects ?? {})) {
     const dirKey = process.platform === "win32" ? dir.toLowerCase() : dir;

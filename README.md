@@ -18,7 +18,7 @@ Today it parses **Claude Code's JSONL transcripts**. The architecture is provide
 ## Requirements
 
 - [Bun](https://bun.sh) ≥ 1.1 (tested on 1.3.13)
-- **Windows, macOS, or Linux.** Only the auto-open-browser step is Windows-specific (it shells out to `cmd /c start`); everywhere else the server runs the same, you just open the URL yourself.
+- **Windows, macOS, or Linux.** The server runs the same everywhere; the auto-open-browser step picks the platform's opener (`open` on macOS, `cmd /c start` on Windows, `xdg-open` elsewhere) and is skipped silently if none is available.
 - At least one supported data source — **Claude Code**, with data in `~/.claude/projects/` *(currently the only built-in source)*
 
 ## Setup
@@ -56,7 +56,7 @@ bun run start
 
 ### 5. Open it
 
-The browser opens automatically on Windows. Otherwise go to **http://localhost:5757**.
+The browser opens automatically on Windows, macOS, and Linux (where `xdg-open` exists). Otherwise go to **http://localhost:5757**.
 
 On first start the app scans every transcript under `~/.claude/projects/`, builds
 `data/cache.db`, and then watches those files — new activity shows up within a
@@ -88,7 +88,7 @@ bun run start        # start the server (same as bun run server.ts)
 bun run dev          # hot-reload with --watch
 bun run typecheck    # tsc --noEmit
 bun run test         # unit test suite
-bun run build        # compile to dist/ai-insights.exe (Windows x64)
+bun run build        # compile a standalone binary for the current platform
 ```
 
 ### Rebuilding the cache
@@ -100,12 +100,16 @@ itself whenever the schema version changes after an update.
 ### Standalone executable
 
 ```bash
-bun run build        # → dist/ai-insights.exe (~60MB, no Bun install needed)
+bun run build        # → dist/ai-insights (dist/ai-insights.exe on Windows), ~60MB, no Bun install needed
 ```
 
-The binary embeds the Bun runtime; ship the `static/` folder alongside it. The
-`build` script targets Windows x64 — on macOS/Linux either run from source or
-retarget: `bun build --compile --target=bun-<darwin|linux>-x64 server.ts --outfile dist/ai-insights`.
+The binary embeds the Bun runtime; ship the `static/` folder alongside it. Both
+`static/` and the `data/` cache are resolved next to the executable, so it can be
+launched from any working directory.
+
+The build targets whatever platform you run it on. To cross-compile, add a target:
+`bun build --compile --target=bun-<windows|darwin|linux>-x64 server.ts --outfile dist/ai-insights`
+(`bun-darwin-arm64` for Apple Silicon).
 
 ---
 
