@@ -106,8 +106,9 @@ capability is missing answers `501`.
   provider-agnostic, it consumes the adapter's neutral output and never touches
   tool-specific files. Edges are either **content references** (a skill's text
   naming `mcp__server__tool`, drawn solid) or **name-keyword similarity** (drawn
-  dashed); connected components become the workflow chains, ordered
-  hook → MCP → skill → command.
+  dashed); connected components become dependency chains, ordered
+  hook → MCP → skill → command, and surface as the "Related components" section
+  of the Skills and MCP tabs.
 
 Claude Code specifics the adapter handles internally: three config sources
 (user > project > plugin) with override ranking, `:`-namespaced command names,

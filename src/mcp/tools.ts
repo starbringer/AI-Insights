@@ -625,7 +625,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: "get_dependency_graph",
     title: "Configuration dependency graph",
     description:
-      "How skills, hooks, MCP servers and commands reference each other, with detected workflow chains. Use it to see which pieces of config are wired together and which are isolated.",
+      "How skills, hooks, MCP servers and commands reference each other, with detected dependency chains. Use it to see which pieces of config are wired together and which are isolated.",
     inputSchema: { type: "object", properties: { ...providerProp }, additionalProperties: false },
     handler: async args => {
       const a = adapter(args);

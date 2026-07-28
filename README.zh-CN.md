@@ -223,6 +223,10 @@ token 与词数统计、带 **Save** 的内嵌编辑器，以及按天的注入 
 覆盖检测、SKILL.md 的 token 成本、`references/` 与 `scripts/` 清单、30 天内**实际记录**
 的调用次数与注入 token，以及展示哪些提示词关键词会触发该 skill 的**触发分析器**。
 
+最后是**关联组件**：与该 skill 相连的 hook、MCP 服务器和命令，以图 + 列表两种形式呈现
+—— 按组件类型分列，箭头由「引用方」指向「被引用方」，实线表示内容中确有引用，虚线表示
+较弱的名称相似信号。若该 skill 与任何组件都无关联，会明确说明。
+
 ![Skills](docs/screenshots/08-skills.png)
 
 #### Hooks
@@ -246,7 +250,8 @@ token 与词数统计、带 **Save** 的内嵌编辑器，以及按天的注入 
 ![MCP](docs/screenshots/11-mcp.png)
 
 服务器从配置文件而非 CLI 枚举；你尚未批准的项目级服务器会被列出，但绝不会被执行 ——
-[原因](docs/architecture.zh-CN.md#mcp-为什么读配置文件而不用-cli)。
+[原因](docs/architecture.zh-CN.md#mcp-为什么读配置文件而不用-cli)。每个服务器同样带有与
+skill 一致的**关联组件**区域 —— 不含任何 skill 的集群（hook 或命令直连服务器）就显示在这里。
 
 #### Permissions（权限）
 
@@ -262,15 +267,6 @@ token 与词数统计、带 **Save** 的内嵌编辑器，以及按天的注入 
 存在但未被索引引用的文件标注 **orphan**（孤儿）徽标。
 
 ![Memory](docs/screenshots/13-memory.png)
-
-#### Workflow（工作流）
-
-跨 skill、hook、MCP 服务器和命令的依赖分析。左栏列出检测到的**工作流** —— 即按
-hook → MCP → skill → command 排序的连通分量。选中其一即可渲染该工作流的图 —— 按组件
-类型分列，箭头由「引用方」指向「被引用方」，实线表示内容中确有引用，虚线表示仅名称
-关键词相似 —— 并附带编号步骤。
-
-![Workflow](docs/screenshots/14-workflow.png)
 
 #### Configs（生效配置）
 
@@ -345,7 +341,7 @@ src/
   config/
     types.ts               ToolConfigAdapter 接口 + 中性配置结构
     index.ts               配置适配器注册表（与 provider 注册表平行）
-    graph.ts               与 provider 无关的依赖图构建器
+    graph.ts               与 provider 无关的依赖图构建器（为「关联组件」提供数据）
   transcripts/
     cache.ts               通用 SQLite 读写辅助函数（与 provider 无关）
     aggregate.ts           SQL 聚合查询（总量、序列、智能体、模型、项目）
@@ -363,12 +359,12 @@ src/
     providersEndpoint.ts   GET /api/providers
     mcpEndpoint.ts         POST /mcp（streamable HTTP）+ GET /api/mcp-server
 static/
-  index.html               侧边栏 SPA 外壳（12 个标签页 + 会话详情浮层）
+  index.html               侧边栏 SPA 外壳（11 个标签页 + 会话详情浮层）
   favicon.svg              浏览器标签页图标，为 16px 下的可辨识度做了扁平化
   style.css                拟物柔和 UI 主题 —— 浅色 + 深色，CSS 变量
   config.css               Harness 标签页 + 运行 Usage 视图的样式
   app.js                   数据请求、ECharts、主题切换、会话树渲染、运行 Usage 视图
-  config.js                Harness 标签页（claudemd/commands/skills/hooks/mcp/permissions/memory/workflow/configs）
+  config.js                Harness 标签页（claudemd/commands/skills/hooks/mcp/permissions/memory/configs）+ 共享的依赖集群渲染器
   lib/
     echarts.min.js         Apache ECharts 5.5.1（离线，1007KB）
 assets/

@@ -234,6 +234,12 @@ Override detection, SKILL.md token cost, `references/` and `scripts/` listings,
 **recorded** invocations and injected tokens over 30 days, and a **trigger
 analyzer** showing which prompt keywords would activate the skill.
 
+**Related components** rounds it out: the hooks, MCP servers and commands this
+skill is wired to, as a graph plus a list — a column per component type, arrows
+running from the referencing component to the referenced one, solid for a content
+reference and dashed for the weaker name-similarity signal. A skill nothing
+references says so instead.
+
 ![Skills](docs/screenshots/08-skills.png)
 
 #### Hooks
@@ -260,7 +266,9 @@ bypasses the 10-minute cache.
 
 Servers are enumerated from config files rather than the CLI, and project-scope
 servers you haven't approved are listed but never executed —
-[why](docs/architecture.md#mcp-why-config-files-not-the-cli).
+[why](docs/architecture.md#mcp-why-config-files-not-the-cli). Each server also gets
+the same **Related components** section as a skill, which is where clusters with no
+skill in them (a hook or command wired straight to a server) show up.
 
 #### Permissions
 
@@ -277,16 +285,6 @@ content, size and last-modified time, and an **orphan** badge for files that exi
 but aren't linked from the index.
 
 ![Memory](docs/screenshots/13-memory.png)
-
-#### Workflow
-
-Dependency analysis across skills, hooks, MCP servers and commands. The left column
-lists detected **workflows** — connected components ordered hook → MCP → skill →
-command. Selecting one renders that workflow's graph — a column per component type,
-arrows running from the referencing component to the referenced one, solid for a
-content reference and dashed for name similarity — plus its numbered steps.
-
-![Workflow](docs/screenshots/14-workflow.png)
 
 #### Configs
 
@@ -362,7 +360,7 @@ src/
   config/
     types.ts               ToolConfigAdapter interface + neutral config shapes
     index.ts               Config-adapter registry (parallel to the provider registry)
-    graph.ts               Provider-agnostic dependency graph builder
+    graph.ts               Provider-agnostic dependency graph builder (feeds "Related components")
   transcripts/
     cache.ts               Generic SQLite read/write helpers (provider-agnostic)
     aggregate.ts           SQL aggregation queries (totals, series, agents, models, projects)
@@ -380,12 +378,12 @@ src/
     providersEndpoint.ts   GET /api/providers
     mcpEndpoint.ts         POST /mcp (streamable HTTP) + GET /api/mcp-server
 static/
-  index.html               Sidebar SPA shell (12 tabs + session-detail overlay)
+  index.html               Sidebar SPA shell (11 tabs + session-detail overlay)
   favicon.svg              Browser-tab icon, flattened for legibility at 16px
   style.css                Neomorphic soft-UI theme — light + dark, CSS variables
   config.css               Styles for the Harness tabs + run Usage view
   app.js                   Fetch, ECharts, theme toggle, session-tree renderer, run Usage view
-  config.js                Harness tabs (claudemd/commands/skills/hooks/mcp/permissions/memory/workflow/configs)
+  config.js                Harness tabs (claudemd/commands/skills/hooks/mcp/permissions/memory/configs) + the shared dependency-cluster renderer
   lib/
     echarts.min.js         Apache ECharts 5.5.1 (offline, 1007KB)
 assets/

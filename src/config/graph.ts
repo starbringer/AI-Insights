@@ -148,10 +148,11 @@ export function buildDependencyGraph(inputs: GraphInputs): DependencyGraph {
 }
 
 /**
- * Fold connected components of the edge set into ordered "workflow chains":
+ * Fold connected components of the edge set into ordered dependency chains:
  * ① hook fires → ② MCP server starts → ③ skill activates → ④ command runs.
  * Only components touching ≥ 2 node types become chains (a lone pair of
- * same-type nodes is not a workflow).
+ * same-type nodes is not a chain). The UI shows the chain a component belongs
+ * to under "Related components" in the Skills and MCP tabs.
  */
 function buildChains(nodes: DependencyNode[], edges: DependencyEdge[]): DependencyGraph["chains"] {
   const parent = new Map<string, string>();

@@ -103,7 +103,8 @@ export interface ToolConfigAdapter {
 - 依赖图构建器：[`src/config/graph.ts`](../src/config/graph.ts) —— 它本身与 provider
   无关，只消费适配器输出的中性数据，从不接触工具专有文件。边分两种：**内容引用**
   （某个 skill 的正文中出现了 `mcp__server__tool`，画成实线）和**名称关键词相似**
-  （画成虚线）；连通分量就是工作流链，按 hook → MCP → skill → command 排序。
+  （画成虚线）；连通分量即依赖链，按 hook → MCP → skill → command 排序，并呈现为
+  Skills 与 MCP 标签页中的「关联组件」区域。
 
 适配器内部处理的 Claude Code 专有细节包括：三个配置来源（用户 > 项目 > 插件）及其
 覆盖优先级、`:` 命名空间的命令名、设置分层（local > project > user，其中部分键该工具

@@ -75,7 +75,7 @@ Routes marked *ranged* accept `?range=1h\|24h\|7d\|30d`. Bucket size adapts:
 | `GET /api/config/mcp` | MCP servers, probe status, tools, schemas, diagnostics |
 | `GET /api/config/memory` | Per-project memory stores |
 | `GET /api/config/effective` | Merged settings layers; `?project=` selects the project layer. Keys Claude Code accumulates rather than overrides (`permissions.allow` / `deny` / `ask`) return every layer's rules concatenated and carry `mergedLevels` instead of `overriddenLevels` |
-| `GET /api/config/dependencies` | Dependency graph: nodes, edges, workflow chains, stats |
+| `GET /api/config/dependencies` | Dependency graph: nodes, edges, dependency chains, stats. Feeds "Related components" in the Skills and MCP tabs |
 
 Write routes only accept paths the matching list endpoint enumerated — see
 [architecture › write safety](architecture.md#write-safety).

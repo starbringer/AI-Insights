@@ -249,12 +249,11 @@ const PAGE_META = {
   settings:    ['Settings', 'Tune warning thresholds and reference pricing'],
   claudemd:    ['Instructions', 'View and edit the instruction files injected into every session'],
   commands:    ['Commands', 'Slash commands across user, project and plugin sources'],
-  skills:      ['Skills', 'Installed skills, their triggers and recorded usage'],
+  skills:      ['Skills', 'Installed skills, their triggers, recorded usage and related components'],
   hooks:       ['Hooks', 'Configured hooks across settings layers, with recorded fires'],
   mcp:         ['MCP Servers', 'Configured MCP servers, their tools and token overhead'],
   permissions: ['Permissions', 'Allow / deny / ask rules across settings layers'],
   memory:      ['Memory', 'Persistent per-project memory stores'],
-  workflow:    ['Workflows', 'Detected workflow chains across skills, hooks, MCP servers and commands'],
   configs:     ['Effective Configs', 'Merged settings layers — which value wins and where it comes from'],
 };
 
