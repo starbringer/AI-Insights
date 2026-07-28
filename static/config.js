@@ -910,6 +910,8 @@ async function renderEffectiveConfigs(project) {
 
 const GRAPH_CAT_COLOR = { skill: '#5f93d1', hook: '#a98cd6', mcp: '#5fb98f', command: '#e3a838' };
 const GRAPH_TYPE_ICON = { hook: '⚡', mcp: '⇄', skill: '❖', command: '/' };
+// Columns run in workflow order, so the graph always reads left to right.
+const GRAPH_LAYERS = ['hook', 'mcp', 'skill', 'command'];
 const GRAPH_TYPE_DESC = {
   hook: 'Hook — fires on its event and runs its actions',
   mcp: 'MCP server — provides tools to the session',
@@ -975,11 +977,25 @@ function renderGraphDetail(sel) {
   const nodes = g.nodes.filter(n => chainIds.has(n.id));
   const edges = g.edges.filter(e => chainIds.has(e.source) && chainIds.has(e.target));
 
+  // Deterministic column layout instead of a force simulation: nodes are grouped
+  // into one column per type in workflow order, so nothing overlaps, the same
+  // workflow always draws the same way, and a big graph just gets taller.
+  const columns = GRAPH_LAYERS
+    .map(type => nodes.filter(n => n.type === type).sort((a, b) => a.name.localeCompare(b.name)))
+    .filter(col => col.length);
+  const rows = Math.max(...columns.map(c => c.length), 1);
+  const COL_W = 230, ROW_H = 74;
+  const pos = new Map();
+  columns.forEach((col, ci) => col.forEach((n, ri) => {
+    // Each column is centred on its own height so short columns sit mid-canvas.
+    pos.set(n.id, { x: ci * COL_W, y: (ri - (col.length - 1) / 2) * ROW_H });
+  }));
+
   el.innerHTML = `
     <div class="chart-card">
       <div class="chart-card-title">Workflow: ${esc(chain.key)}
-        <span class="title-note" title="Solid edges: one component's content literally references the other. Dashed edges: the names share a keyword (weaker signal).">solid = content reference · dashed = name similarity</span></div>
-      <div id="chart-cfg-graph" style="height:320px"></div>
+        <span class="title-note" title="Components are grouped into a column per type and flow left to right. An arrow points from the component that references another to the one it references. Solid edges: one component's content literally names the other. Dashed edges: the names share a keyword (weaker signal). Hover any node or edge for detail.">solid = content reference · dashed = name similarity · hover for detail</span></div>
+      <div id="chart-cfg-graph"></div>
     </div>
     <div class="chart-card" style="margin-top:14px">
       <div class="chart-card-title">Steps</div>
@@ -998,34 +1014,59 @@ function renderGraphDetail(sel) {
     degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
   }
 
+  // ECharts fits the node bounding box into the canvas with one uniform scale,
+  // so the canvas has to be sized to that same scale or the graph floats in a
+  // sea of dead space. Width is the binding constraint (labels need the room);
+  // never scale above 1, so a two-node workflow keeps its natural spacing.
+  const box = document.getElementById('chart-cfg-graph');
+  const spanX = (columns.length - 1) * COL_W;
+  const spanY = (rows - 1) * ROW_H;
+  const scale = spanX > 0 ? Math.min(1, Math.max(180, box.clientWidth - 80) / spanX) : 1;
+  box.style.height = `${Math.max(260, Math.round(spanY * scale) + 120)}px`;
+
   const cats = ['skill', 'hook', 'mcp', 'command'];
   const chart = initChart('chart-cfg-graph');
   if (!chart) return;
   if (!nodes.length) return renderChartEmpty(chart, 'No components');
+  const t = chartTheme();
   chart.setOption({ ...baseOption(),
     tooltip: { formatter: p => p.dataType === 'edge'
       ? `${esc(p.data.source.split(':').slice(1).join(':'))} <b>${esc(p.data.label ?? '')}</b> ${esc(p.data.target.split(':').slice(1).join(':'))}${p.data.via === 'name' ? ' <i>(name match)</i>' : ''}`
       : `<b>${esc(p.data.name)}</b> — ${esc(p.data.categoryName)}${p.data.detail ? `<br>${esc(p.data.detail)}` : ''}` },
     legend: { top: 0, data: cats.filter(c => nodes.some(n => n.type === c)), textStyle: { color: COLOR.dim } },
     series: [{
-      type: 'graph', layout: 'force', roam: true,
-      force: { repulsion: 320, edgeLength: [90, 160], gravity: 0.08 },
+      type: 'graph', layout: 'none', roam: true,
       categories: cats.map(c => ({ name: c, itemStyle: { color: GRAPH_CAT_COLOR[c] } })),
       data: nodes.map(n => ({
         id: n.id,
-        name: n.name.length > 24 ? n.name.slice(0, 23) + '…' : n.name,
+        x: pos.get(n.id).x, y: pos.get(n.id).y,
+        name: n.name,
         category: cats.indexOf(n.type),
         categoryName: n.type,
         detail: n.detail ? String(n.detail).slice(0, 120) : undefined,
-        symbolSize: 12 + Math.min(18, (degree.get(n.id) ?? 0) * 4),
-        label: { show: true, color: COLOR.dim, fontSize: 10 },
+        symbolSize: 13 + Math.min(15, (degree.get(n.id) ?? 0) * 3),
+        // The name sits below the node on an opaque chip in full-strength text
+        // colour, so neither the node fill nor a crossing edge can wash it out.
+        label: {
+          show: true, position: 'bottom', distance: 7,
+          formatter: () => (n.name.length > 22 ? n.name.slice(0, 21) + '…' : n.name),
+          color: t.text, fontSize: 11, fontWeight: 500,
+          backgroundColor: t.surface, padding: [3, 6], borderRadius: 5,
+        },
       })),
       links: edges.map(e => ({
         source: e.source, target: e.target, label: e.label, via: e.via,
-        lineStyle: { type: e.via === 'name' ? 'dashed' : 'solid', opacity: e.via === 'name' ? 0.35 : 0.75, width: e.via === 'name' ? 1 : 1.6, curveness: 0.15 },
+        lineStyle: { type: e.via === 'name' ? 'dashed' : 'solid', opacity: e.via === 'name' ? 0.4 : 0.8, width: e.via === 'name' ? 1 : 1.6, curveness: 0.12 },
       })),
-      edgeLabel: { show: true, formatter: p => p.data.label, color: COLOR.dim, fontSize: 10 },
-      emphasis: { focus: 'adjacency', label: { show: true } },
+      edgeSymbol: ['none', 'arrow'], edgeSymbolSize: 7,
+      // Edge labels only on hover — drawn for every edge they bury a busy graph.
+      edgeLabel: { show: false },
+      emphasis: {
+        focus: 'adjacency',
+        label: { show: true },
+        edgeLabel: { show: true, formatter: p => p.data.label, color: t.text, fontSize: 10, backgroundColor: t.surface, padding: [2, 5], borderRadius: 4 },
+      },
+      blur: { itemStyle: { opacity: 0.25 }, lineStyle: { opacity: 0.12 }, label: { opacity: 0.3 } },
     }],
   });
 }

@@ -282,9 +282,9 @@ but aren't linked from the index.
 
 Dependency analysis across skills, hooks, MCP servers and commands. The left column
 lists detected **workflows** — connected components ordered hook → MCP → skill →
-command. Selecting one renders that workflow's graph with labelled edges (solid =
-one component references another by name, dashed = keyword similarity) plus its
-numbered steps.
+command. Selecting one renders that workflow's graph — a column per component type,
+arrows running from the referencing component to the referenced one, solid for a
+content reference and dashed for name similarity — plus its numbered steps.
 
 ![Workflow](docs/screenshots/14-workflow.png)
 
