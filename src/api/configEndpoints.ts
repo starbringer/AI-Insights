@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { getDb } from "../db";
-import { configAdapterFor } from "../config";
+import { CONFIG_ADAPTERS, configAdapterFor } from "../config";
 import { buildDependencyGraph } from "../config/graph";
 import type { ToolConfigAdapter } from "../config/types";
 
@@ -20,6 +20,18 @@ function adapterOr501(c: { req: { query: (k: string) => string | undefined } }):
   ToolConfigAdapter | null {
   return configAdapterFor(c.req.query("provider"));
 }
+
+// `?provider=` naming a provider with no config adapter is a caller mistake, not
+// a missing capability — surface it as 400 with the ids that do work.
+configRouter.use("*", async (c, next) => {
+  const requested = c.req.query("provider");
+  if (requested && requested !== "all" && !CONFIG_ADAPTERS.some(a => a.providerId === requested)) {
+    return c.json({
+      error: `unknown provider "${requested}" — providers with a config adapter: ${CONFIG_ADAPTERS.map(a => a.providerId).join(", ")}`,
+    }, 400);
+  }
+  await next();
+});
 
 const notSupported = { error: "not supported by this provider" } as const;
 

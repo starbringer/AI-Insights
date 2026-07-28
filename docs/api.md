@@ -16,8 +16,19 @@ that capability.
 |---|---|
 | `GET /api/providers` | Registered providers with a live `hasData` flag |
 
-Every `/api/config/*` route accepts `?provider=<id>` to target a specific tool
-(defaults to the active/first provider).
+**Every read route accepts `?provider=<id>`** to select the data source:
+
+| Value | Meaning |
+|---|---|
+| *omitted* | The default provider — the first registered one (`claude-code` today) |
+| `<id>` | That provider only |
+| `all` | No filter: aggregate across every registered provider |
+| anything else | `400` with a message listing the valid ids |
+
+On `/api/config/*`, `all` collapses to the default adapter — configuration is
+inherently per-tool. Routes that address a single run or agent by id resolve the
+owning provider from the record itself; `?provider=` there acts as an assertion
+and `404`s on a mismatch.
 
 ## Usage data
 
@@ -63,7 +74,7 @@ Routes marked *ranged* accept `?range=1h\|24h\|7d\|30d`. Bucket size adapts:
 | `GET /api/config/permissions` | Merged allow/deny/ask rules; `?project=` adds project layers |
 | `GET /api/config/mcp` | MCP servers, probe status, tools, schemas, diagnostics |
 | `GET /api/config/memory` | Per-project memory stores |
-| `GET /api/config/effective` | Merged settings layers; `?project=` selects the project layer |
+| `GET /api/config/effective` | Merged settings layers; `?project=` selects the project layer. Keys Claude Code accumulates rather than overrides (`permissions.allow` / `deny` / `ask`) return every layer's rules concatenated and carry `mergedLevels` instead of `overriddenLevels` |
 | `GET /api/config/dependencies` | Dependency graph: nodes, edges, workflow chains, stats |
 
 Write routes only accept paths the matching list endpoint enumerated — see
@@ -75,3 +86,16 @@ Write routes only accept paths the matching list endpoint enumerated — see
 |---|---|
 | `GET /api/settings/thresholds` · `PUT /api/settings/thresholds` | Warning/error thresholds behind the ok/warn/error badges on the Harness tabs. `PUT` merges the keys you send and persists to `data/thresholds.json` |
 | `GET /api/settings/pricing` | Per-model reference pricing that drives every cost number. Read-only over HTTP — edit `data/pricing.json` to change it |
+
+## MCP
+
+| Route | Description |
+|---|---|
+| `POST /mcp` | Model Context Protocol endpoint, streamable HTTP transport. Stateless: one JSON-RPC message in, one `application/json` response out; notifications answer `202` |
+| `GET /mcp` · `DELETE /mcp` | `405` — no server-initiated SSE stream, no sessions to terminate |
+| `GET /api/mcp-server` | Human-readable summary: protocol versions, tool count, and every tool's name and description |
+
+`POST /mcp` rejects a non-loopback `Origin` header with `403` (DNS-rebinding
+defence) and an unsupported `MCP-Protocol-Version` header with `400`. The tools
+are read-only and each accepts the same `provider` argument as the routes above
+— see [docs/mcp.md](mcp.md).

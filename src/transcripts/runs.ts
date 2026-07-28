@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { upsertRun } from "./cache";
+import type { ProviderFilter } from "./aggregate";
 
 /**
  * Walk parent_agent_id chains and set agents.run_id (and turns.run_id) to the
@@ -140,12 +141,13 @@ export interface RunSummary {
 }
 
 export function listRuns(db: Database, opts: {
-  limit?: number; offset?: number; project?: string; search?: string;
+  limit?: number; offset?: number; project?: string; search?: string; provider?: ProviderFilter;
 } = {}): { rows: RunSummary[]; total: number } {
-  const { limit = 50, offset = 0, project, search } = opts;
+  const { limit = 50, offset = 0, project, search, provider } = opts;
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
+  if (provider) { conditions.push("r.provider = ?"); params.push(provider); }
   if (project) { conditions.push("r.cwd = ?"); params.push(project); }
   if (search) { conditions.push("(r.title LIKE ? OR r.cwd LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
 
@@ -263,11 +265,12 @@ export function loadRun(db: Database, runId: string): RunDetail | null {
   return { run, agents };
 }
 
-export function getActiveRuns(db: Database, windowMs = 5 * 60_000): number {
-  const since = new Date(Date.now() - windowMs).toISOString();
-  const row = db.query<{ n: number }, [string]>(
-    "SELECT COUNT(DISTINCT run_id) as n FROM turns WHERE ts >= ?"
-  ).get(since);
+export function getActiveRuns(db: Database, windowMs = 5 * 60_000, provider?: ProviderFilter): number {
+  const params: (string | number)[] = [new Date(Date.now() - windowMs).toISOString()];
+  if (provider) params.push(provider);
+  const row = db.query<{ n: number }, (string | number)[]>(
+    `SELECT COUNT(DISTINCT run_id) as n FROM turns WHERE ts >= ?${provider ? " AND provider = ?" : ""}`
+  ).get(...params);
   return row?.n ?? 0;
 }
 
@@ -287,9 +290,12 @@ export interface TopRunStat {
   total: number;
 }
 
-export function getTopRuns(db: Database, limit = 10, since?: string): TopRunStat[] {
+export function getTopRuns(db: Database, limit = 10, since?: string, provider?: ProviderFilter): TopRunStat[] {
   // Empty `since` compares <= every ISO timestamp, i.e. no filter.
-  return db.query<TopRunStat, [string, number]>(
+  const params: (string | number)[] = [since ?? ""];
+  if (provider) params.push(provider);
+  params.push(limit);
+  return db.query<TopRunStat, (string | number)[]>(
     `SELECT
        r.run_id, r.title, r.cwd, r.last_seen_at, r.agent_count, r.turn_count,
        t.model, t.input, t.cacheCreate5m, t.cacheCreate1h, t.cacheRead, t.output, t.total
@@ -304,10 +310,10 @@ export function getTopRuns(db: Database, limit = 10, since?: string): TopRunStat
          SUM(output_tokens)   as output,
          SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
        FROM turns
-       WHERE ts >= ?
+       WHERE ts >= ?${provider ? " AND provider = ?" : ""}
        GROUP BY run_id
      ) t ON r.run_id = t.run_id
      ORDER BY t.total DESC
      LIMIT ?`
-  ).all(since ?? "", limit);
+  ).all(...params);
 }

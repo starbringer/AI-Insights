@@ -106,3 +106,9 @@ export const DB_PATH = join(DATA_DIR, "cache.db");
 export const THRESHOLDS_PATH = join(DATA_DIR, "thresholds.json");
 export const PRICING_PATH = join(DATA_DIR, "pricing.json");
 export const STATIC_DIR = join(APP_DIR, "static");
+/**
+ * Assets this app installs into the AI tools it detects — currently the
+ * usage-review skill. Resolved next to the executable exactly like `static/`,
+ * so a compiled binary finds them as long as `assets/` ships alongside it.
+ */
+export const SKILL_ASSETS_DIR = join(APP_DIR, "assets", "skills");

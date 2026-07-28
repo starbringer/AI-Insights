@@ -14,8 +14,18 @@ UI 的所有操作都经由这些路由，因此它们同时也是可供脚本�
 |---|---|
 | `GET /api/providers` | 已注册的 provider 列表，附实时 `hasData` 标志 |
 
-所有 `/api/config/*` 路由都接受 `?provider=<id>` 来指定目标工具（默认使用当前/第一个
-provider）。
+**所有读取类路由都接受 `?provider=<id>`** 来选择数据源：
+
+| 取值 | 含义 |
+|---|---|
+| *省略* | 默认 provider —— 第一个已注册的（当前为 `claude-code`） |
+| `<id>` | 仅该 provider |
+| `all` | 不过滤：跨所有已注册 provider 汇总 |
+| 其他 | 返回 `400`，并在消息中列出合法的 id |
+
+在 `/api/config/*` 上，`all` 会退化为默认适配器 —— 配置本身就是按工具划分的。按 id
+定位单个运行或智能体的路由会从记录本身解析其所属 provider；那里的 `?provider=` 仅作
+断言，不匹配时返回 `404`。
 
 ## 使用数据
 
@@ -61,7 +71,7 @@ provider）。
 | `GET /api/config/permissions` | 合并后的 allow/deny/ask 规则；`?project=` 可加入项目层 |
 | `GET /api/config/mcp` | MCP 服务器、探测状态、工具、schema、诊断 |
 | `GET /api/config/memory` | 按项目的记忆库 |
-| `GET /api/config/effective` | 合并后的设置层；`?project=` 选择项目层 |
+| `GET /api/config/effective` | 合并后的设置层；`?project=` 选择项目层。Claude Code 会累加而非覆盖的键（`permissions.allow` / `deny` / `ask`）返回各层规则的拼接结果，并带 `mergedLevels` 而非 `overriddenLevels` |
 | `GET /api/config/dependencies` | 依赖图：节点、边、工作流链、统计 |
 
 写入类路由只接受对应列表接口枚举过的路径 —— 见
@@ -73,3 +83,15 @@ provider）。
 |---|---|
 | `GET /api/settings/thresholds` · `PUT /api/settings/thresholds` | Harness 标签页上 ok/warn/error 状态标记所用的告警/错误阈值。`PUT` 只合并你传入的键，并写入 `data/thresholds.json` |
 | `GET /api/settings/pricing` | 驱动应用内全部成本数字的分模型参考价格。HTTP 接口只读 —— 如需修改请编辑 `data/pricing.json` |
+
+## MCP
+
+| 路由 | 说明 |
+|---|---|
+| `POST /mcp` | Model Context Protocol 端点，streamable HTTP 传输。无状态：一条 JSON-RPC 消息进、一个 `application/json` 响应出；通知类消息返回 `202` |
+| `GET /mcp` · `DELETE /mcp` | `405` —— 不提供服务端主动推送的 SSE 流，也没有会话需要终止 |
+| `GET /api/mcp-server` | 人类可读摘要：协议版本、工具数量，以及每个工具的名称与说明 |
+
+`POST /mcp` 会以 `403` 拒绝非回环的 `Origin` 头（防御 DNS 重绑定攻击），以 `400` 拒绝
+不受支持的 `MCP-Protocol-Version` 头。这些工具全部只读，且接受与上述路由相同的
+`provider` 参数 —— 见 [docs/mcp.zh-CN.md](mcp.zh-CN.md)。

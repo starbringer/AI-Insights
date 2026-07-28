@@ -9,6 +9,7 @@ import { getPermissionModel } from "./permissions";
 import { listMemoryStores } from "./memory";
 import { getEffectiveConfig } from "./effective";
 import { listProjectDirs } from "./shared";
+import { claudeCodeIsInstalled, installSkill, registerMcpServer } from "./provision";
 
 /**
  * Claude Code's implementation of the provider-agnostic ToolConfigAdapter.
@@ -62,4 +63,9 @@ export const claudeCodeConfigAdapter: ToolConfigAdapter = {
   listMemoryStores,
 
   effectiveConfig: getEffectiveConfig,
+
+  displayName: "Claude Code",
+  isInstalled: claudeCodeIsInstalled,
+  installSkill,
+  registerMcpServer,
 };

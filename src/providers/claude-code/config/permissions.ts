@@ -5,7 +5,7 @@ import { SETTINGS_PATH } from "../../../paths";
 import type {
   ConfigScope, PermissionModelInfo, PermissionLayerInfo, PermissionRuleInfo, PermissionParam,
 } from "../../../config/types";
-import { listProjectDirs, pathKey, readJsonFile } from "./shared";
+import { listProjectDirs, pathKey, readJsonFile, shadowsUserConfig } from "./shared";
 
 const LEVEL_RANK: Record<string, number> = { user: 1, project: 2, local: 3 };
 
@@ -57,7 +57,9 @@ export function getPermissionModel(db: Database, projectDir?: string): Permissio
   }
 
   const layers: PermissionLayerInfo[] = [layerFromFile(SETTINGS_PATH, "user")];
-  if (projectDir) {
+  // ~/.claude as a project dir would read the user layer a second time and
+  // mark every rule as overriding itself.
+  if (projectDir && !shadowsUserConfig(projectDir)) {
     layers.push(layerFromFile(join(projectDir, ".claude", "settings.json"), "project"));
     layers.push(layerFromFile(join(projectDir, ".claude", "settings.local.json"), "local"));
   }
