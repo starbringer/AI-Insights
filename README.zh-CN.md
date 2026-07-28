@@ -359,6 +359,7 @@ src/
     mcpEndpoint.ts         POST /mcp（streamable HTTP）+ GET /api/mcp-server
 static/
   index.html               侧边栏 SPA 外壳（12 个标签页 + 会话详情浮层）
+  favicon.svg              浏览器标签页图标，为 16px 下的可辨识度做了扁平化
   style.css                拟物柔和 UI 主题 —— 浅色 + 深色，CSS 变量
   config.css               Harness 标签页 + 运行 Usage 视图的样式
   app.js                   数据请求、ECharts、主题切换、会话树渲染、运行 Usage 视图
@@ -366,6 +367,8 @@ static/
   lib/
     echarts.min.js         Apache ECharts 5.5.1（离线，1007KB）
 assets/
+  icon.svg                 主图标源文件，512×512（static/favicon.svg 是 32px 版本）
+  social-preview.png       GitHub 社交预览图，1280×640 —— 由同目录的 .html 渲染生成
   skills/
     ai-usage-review/       安装到每个已检测 AI 工具中的技能
       SKILL.md             工作流：定范围 → 采集 → 诊断 → 报告 → 落地

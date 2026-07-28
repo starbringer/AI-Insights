@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="AI Insights">
+  <title>AI Insights</title>
+
+  <defs>
+    <!-- Slate tile, lit from the top-left like the app's soft-UI surfaces -->
+    <linearGradient id="tile" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#343841"/>
+      <stop offset="0.55" stop-color="#292c33"/>
+      <stop offset="1" stop-color="#212429"/>
+    </linearGradient>
+
+    <!-- Raised inner edge: light at the top-left, shadow at the bottom-right -->
+    <linearGradient id="rim" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+
+    <!-- The single brand accent: soft amber -->
+    <linearGradient id="amber" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#f5c86c"/>
+      <stop offset="0.5" stop-color="#f0b94a"/>
+      <stop offset="1" stop-color="#dca22a"/>
+    </linearGradient>
+
+    <filter id="lift" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+
+  <!-- Tile -->
+  <rect width="512" height="512" rx="112" fill="url(#tile)"/>
+  <rect x="3" y="3" width="506" height="506" rx="109" fill="none" stroke="url(#rim)" stroke-width="6"/>
+
+  <g filter="url(#lift)">
+    <!-- Usage bars, rising left to right -->
+    <g fill="url(#amber)">
+      <rect x="155" y="232" width="38" height="54"  rx="10"/>
+      <rect x="205" y="194" width="38" height="92"  rx="10"/>
+      <rect x="255" y="150" width="38" height="136" rx="10"/>
+    </g>
+
+    <!-- Lens: the review that reads them -->
+    <g fill="none" stroke="url(#amber)" stroke-width="42" stroke-linecap="round">
+      <circle cx="224" cy="216" r="128"/>
+      <path d="M317 309 L400 392" stroke-width="51"/>
+    </g>
+  </g>
+</svg>

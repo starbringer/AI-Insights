@@ -377,6 +377,7 @@ src/
     mcpEndpoint.ts         POST /mcp (streamable HTTP) + GET /api/mcp-server
 static/
   index.html               Sidebar SPA shell (12 tabs + session-detail overlay)
+  favicon.svg              Browser-tab icon, flattened for legibility at 16px
   style.css                Neomorphic soft-UI theme — light + dark, CSS variables
   config.css               Styles for the Harness tabs + run Usage view
   app.js                   Fetch, ECharts, theme toggle, session-tree renderer, run Usage view
@@ -384,6 +385,8 @@ static/
   lib/
     echarts.min.js         Apache ECharts 5.5.1 (offline, 1007KB)
 assets/
+  icon.svg                 Master app icon, 512×512 (static/favicon.svg is the 32px cut)
+  social-preview.png       GitHub social preview, 1280×640 — rendered from the .html beside it
   skills/
     ai-usage-review/       The skill installed into every detected AI tool
       SKILL.md             Workflow: scope → gather → diagnose → report → apply
