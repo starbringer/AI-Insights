@@ -4,7 +4,7 @@ import type { Database } from "bun:sqlite";
 import { countTokens } from "../../../tokenizer";
 import { CLAUDE_DIR } from "../../../paths";
 import type { CommandInfo } from "../../../config/types";
-import { listProjectDirs, parseFrontmatter, enabledPluginDirs, markOverrides, pathKey } from "./shared";
+import { listProjectDirs, listConfigLayerDirs, parseFrontmatter, enabledPluginDirs, markOverrides, pathKey } from "./shared";
 
 const USER_COMMANDS_DIR = join(CLAUDE_DIR, "commands");
 
@@ -64,7 +64,7 @@ function scanCommandDir(dir: string, opts: ScanOpts, out: CommandInfo[]): void {
 export function listCommands(db: Database): CommandInfo[] {
   const out: CommandInfo[] = [];
   scanCommandDir(USER_COMMANDS_DIR, { source: "user" }, out);
-  for (const dir of listProjectDirs(db)) {
+  for (const dir of listConfigLayerDirs(db)) {
     scanCommandDir(join(dir, ".claude", "commands"), { source: "project", projectDir: dir }, out);
   }
   for (const { dir, plugin } of enabledPluginDirs("commands")) {

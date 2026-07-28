@@ -8,6 +8,8 @@
 - [转录 Provider](#转录-provider)
 - [配置适配器](#配置适配器)
 - [新增一个 Provider](#新增一个-provider)
+- [MCP 服务器](#mcp-服务器)
+- [自动装配](#自动装配)
 - [MCP 为什么读配置文件而不用 CLI](#mcp-为什么读配置文件而不用-cli)
 - [写入安全](#写入安全)
 - [网络绑定](#网络绑定)
@@ -108,6 +110,17 @@ export interface ToolConfigAdapter {
 只从某一层读取 —— 自 Claude Code 2.1.207 起 `autoMode`、`pluginConfigs` 仅在用户层
 生效），以及支持块标量的 YAML frontmatter 解析。
 
+有两条分层规则并非简单的“高层覆盖低层”：
+
+- **权限规则是累加的。** `permissions.allow` / `deny` / `ask` 在所有层同时生效，因此
+  `/api/config/effective` 会把各层拼接起来，并返回 `mergedLevels` 而不是
+  `overriddenLevels`。同级的 `permissions.defaultMode` 等键仍按覆盖处理。
+- **`.claude` 目录就是 `~/.claude` 的项目不贡献任何层。** 当 Claude Code 以主目录
+  作为 cwd 运行时就会出现这种情况；把它当作项目层读取等于让用户层和自己比较，
+  会导致每个 hook、skill、command 被重复计算。
+  [`config/shared.ts`](../src/providers/claude-code/config/shared.ts) 中的
+  `shadowsUserConfig()` 负责过滤。
+
 ## 新增一个 Provider
 
 **使用数据（Dashboard、Runs、运行详情）：**
@@ -122,7 +135,63 @@ export interface ToolConfigAdapter {
 
 1. 为该工具创建一个 `ToolConfigAdapter` —— 只实现对它有意义的能力。
 2. 在 [`src/config/index.ts`](../src/config/index.ts) 的 `CONFIG_ADAPTERS` 中注册。
-3. 到此为止。标签页、路由和依赖图都会跟随 `capabilities()` 的声明自动适配。
+3. 到此为止。标签页、路由、MCP 工具和依赖图都会跟随 `capabilities()` 的声明自动适配。
+
+**自动装配（可选）：** 在适配器上实现 `isInstalled`、`installSkill` 和
+`registerMcpServer`，内置技能与 MCP 注册就会一并推送到该工具。见[自动装配](#自动装配)。
+
+## MCP 服务器
+
+本应用既是 MCP *客户端*（探测你配置的服务器以列出其工具，见下文），也是 MCP
+*服务器*（对外暴露自己的分析数据）。两者是互不相干的代码路径，只是恰好说同一种协议。
+
+服务器位于 [`src/mcp/`](../src/mcp/)，按“协议与传输不会各自漂移”的原则拆分：
+
+| 文件 | 职责 |
+|---|---|
+| `src/mcp/tools.ts` | 工具注册表。每个工具调用与对应 HTTP 路由完全相同的库函数 —— 一份实现，两道前门 |
+| `src/mcp/protocol.ts` | 与传输无关的 JSON-RPC 分发：`initialize`、`tools/list`、`tools/call`、`ping` |
+| `src/api/mcpEndpoint.ts` | Streamable HTTP 传输，挂载在仪表盘同一端口的 `/mcp` |
+| `mcp-stdio.ts` | 面向只能以子进程方式启动服务器的客户端的 stdio 传输 |
+
+三个值得了解的设计决定：
+
+**无状态。** 不签发 `Mcp-Session-Id`，每个 POST 都以单个 `application/json` 响应体作答，
+而非 SSE 流。服务器不保存任何按客户端的状态，也从不主动发消息，因此会话没有收益，只会
+带来一整类过期相关的 bug。这两点都是规范明确允许的。
+
+**只读。** 没有任何工具包装写入路由。写入路径会修改 CLAUDE.md、hook 脚本和技能 ——
+这类变更必须经过人。建议以文本形式返回，由用户自己的助手用其受权限管控的编辑工具落地。
+
+**协议手写，而非引入 SDK。** 线上格式只有约 200 行 JSON-RPC，直接对接 Bun 的 `fetch`
+处理器。官方 SDK 的 HTTP 传输需要 Node 的 `IncomingMessage`/`ServerResponse` 对象，而
+Bun 上的 Hono 没有；适配它比实现本服务器要回答的这几个方法更脆弱。
+`src/mcp/protocol.test.ts` 固定了线上格式。
+
+## 自动装配
+
+启动时，应用会把自己的资产安装进本机上存在的 AI 工具：`ai-usage-review` 技能，以及自身
+MCP 端点的注册。[`src/provision.ts`](../src/provision.ts) 与 provider 无关 —— 它遍历
+`CONFIG_ADAPTERS`，调用三个可选的适配器方法：
+
+```ts
+isInstalled?(): boolean;                                  // 该工具在本机上吗？
+installSkill?(pkg: SkillPackage): ProvisionResult;        // 写入其技能目录
+registerMcpServer?(s: McpServerRegistration): Promise<ProvisionResult>;
+```
+
+未实现这些方法的适配器直接跳过装配，因此新增一个工具只需在它自己的目录内实现这三个方法
+—— `src/providers/<id>/` 之外无需任何改动。
+
+技能资产以真实 markdown 文件形式放在 [`assets/skills/`](../assets/skills/)，与 `static/`
+一样按可执行文件的位置解析，从而保持可评审、可编辑，而不是被内联成 TypeScript 字符串。
+
+**为什么用 `claude mcp add` 而不是直接写文件。** Claude Code 适配器通过该工具自己的 CLI
+注册服务器。`~/.claude.json` 同时保存着按项目的会话状态，可能有数 MB；从本进程做
+读-改-写会与正在运行的 Claude Code 竞争，可能把它覆盖掉。适配器只*读取*该文件，用于判断
+注册是否已经正确。当 CLI 无法运行时，装配会打印确切的命令，而不是去猜。
+
+每一步都幂等且先比对后写入，因此第二次运行是无输出的空操作。`--no-provision` 可完全关闭。
 
 ## MCP 为什么读配置文件而不用 CLI
 

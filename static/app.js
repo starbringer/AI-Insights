@@ -51,8 +51,16 @@ function esc(s) {
 
 // ===== API =====
 
+// Every read endpoint is scoped to the active data source. Adding the param
+// here means no call site can forget it; paths that already carry one (the
+// /api/config/* calls build theirs with pq()) are left alone.
+function withProvider(path) {
+  if (!currentProviderId || path.includes('provider=')) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}provider=${encodeURIComponent(currentProviderId)}`;
+}
+
 async function api(path) {
-  const res = await fetch(`/api${path}`);
+  const res = await fetch(`/api${withProvider(path)}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }

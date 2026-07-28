@@ -3,7 +3,7 @@ import { isAbsolute, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { CLAUDE_DIR, SETTINGS_PATH, CLAUDE_JSON_PATH } from "../../../paths";
 import type { HookActionInfo, HookEntryInfo, HooksReport, ConfigScope } from "../../../config/types";
-import { listProjectDirs, pathKey, readJsonFile } from "./shared";
+import { listConfigLayerDirs, pathKey, readJsonFile } from "./shared";
 
 interface RawMatcher {
   matcher?: string;
@@ -119,7 +119,7 @@ export function listHooks(db: Database): HooksReport {
   collectFromFile(SETTINGS_PATH, "user", undefined, entries);
   // Newer Claude Code versions can also carry hooks in ~/.claude.json.
   if (existsSync(CLAUDE_JSON_PATH)) collectFromFile(CLAUDE_JSON_PATH, "user", undefined, entries);
-  for (const dir of listProjectDirs(db)) {
+  for (const dir of listConfigLayerDirs(db)) {
     collectFromFile(join(dir, ".claude", "settings.json"), "project", dir, entries);
     collectFromFile(join(dir, ".claude", "settings.local.json"), "local", dir, entries);
   }

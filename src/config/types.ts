@@ -206,6 +206,7 @@ export interface EffectiveConfigEntry {
   value: unknown;
   source: ConfigScope;
   overriddenLevels?: ConfigScope[]; // defined at lower-priority layers too
+  mergedLevels?: ConfigScope[];     // accumulated, not overridden: every layer listed still applies
   ignoredLevels?: ConfigScope[];    // defined at layers the tool never reads
   sourceIgnored?: boolean;          // every definition sits in an ignored layer
 }
@@ -243,6 +244,40 @@ export interface DependencyGraph {
   edges: DependencyEdge[];
   chains: { key: string; steps: DependencyChainStep[] }[];
   stats: { skills: number; hooks: number; mcpServers: number; commands: number; relationships: number };
+}
+
+// ---- Provisioning (installing this app's own assets into the tool) -------------
+
+/** One file of a skill package, at a path relative to the skill's directory. */
+export interface SkillPackageFile {
+  relPath: string;            // e.g. "SKILL.md" or "references/playbook.md"
+  content: string;
+}
+
+/** A skill this app ships and wants installed into every detected tool. */
+export interface SkillPackage {
+  name: string;               // directory name, e.g. "ai-usage-review"
+  files: SkillPackageFile[];
+}
+
+export interface McpServerRegistration {
+  name: string;
+  url: string;                // streamable-HTTP endpoint
+}
+
+export type ProvisionStatus =
+  | "installed"   // created for the first time
+  | "updated"     // existed but differed, and was refreshed
+  | "unchanged"   // already correct
+  | "skipped"     // nothing to do here, with a reason
+  | "failed";     // attempted and failed, with the reason
+
+export interface ProvisionResult {
+  status: ProvisionStatus;
+  detail: string;
+  path?: string;
+  /** Copy-pasteable command for the user when automatic setup was skipped. */
+  manualCommand?: string;
 }
 
 // ---- The adapter interface -----------------------------------------------------
@@ -296,4 +331,22 @@ export interface ToolConfigAdapter {
   listMemoryStores?(db: Database): MemoryStoreInfo[];
 
   effectiveConfig?(db: Database, projectDir?: string): EffectiveConfigModel;
+
+  // ---- Provisioning ----
+  // Optional, and deliberately separate from the read/write config methods:
+  // these are how the app installs ITS OWN assets (the usage-review skill, the
+  // MCP server registration) into whichever tools are present on the machine.
+  // A provider that omits them is simply not provisioned.
+
+  /** Human-readable name used in provisioning logs. Defaults to providerId. */
+  displayName?: string;
+
+  /** Is this tool actually installed here? Gates every provisioning step. */
+  isInstalled?(): boolean;
+
+  /** Install or refresh a skill in the tool's user-scope skill directory. */
+  installSkill?(pkg: SkillPackage): ProvisionResult;
+
+  /** Make an MCP server reachable from this tool. */
+  registerMcpServer?(server: McpServerRegistration): Promise<ProvisionResult>;
 }

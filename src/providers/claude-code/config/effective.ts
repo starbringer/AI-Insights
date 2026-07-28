@@ -3,9 +3,19 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { SETTINGS_PATH } from "../../../paths";
 import type { ConfigLayerInfo, ConfigScope, EffectiveConfigEntry, EffectiveConfigModel } from "../../../config/types";
-import { listProjectDirs, pathKey } from "./shared";
+import { listProjectDirs, pathKey, shadowsUserConfig } from "./shared";
 
 const LEVEL_ORDER: Record<string, number> = { user: 1, project: 2, local: 3 };
+
+/**
+ * Leaf keys Claude Code ACCUMULATES across layers rather than overriding —
+ * every layer's rules stay in force. Treating the top layer as the sole winner
+ * reported a two-rule project allowlist as killing a 59-rule user allowlist,
+ * when all 61 rules were live. Sibling keys (permissions.defaultMode, …) do
+ * override normally.
+ */
+const CONCAT_LEAF_KEYS = new Set(["permissions.allow", "permissions.deny", "permissions.ask"]);
+const CONCAT_PARENT_KEYS = new Set(["permissions"]);
 
 /**
  * Keys Claude Code (≥2.1.207) only reads from specific layers — writing them
@@ -44,23 +54,43 @@ function readLayer(filePath: string, level: ConfigScope): ConfigLayerInfo {
   return { level, filePath, exists, parseError, raw };
 }
 
+interface PathMap { level: ConfigScope; paths: Map<string, unknown> }
+
+/** Every layer's entries for an accumulated leaf key, lowest priority first. */
+function concatLeaf(parts: PathMap[], key: string): unknown[] {
+  const out: unknown[] = [];
+  for (const pm of parts) {
+    const v = pm.paths.get(key);
+    if (Array.isArray(v)) out.push(...v);
+  }
+  return out;
+}
+
 /**
- * Read-only merged view of the settings layers (local > project > user):
- * every top-level key plus one level of nested leaves, with the winning
- * value, its source layer, which layers it overrides, and which definitions
- * sit in layers the tool never reads.
+ * The object holding accumulated leaves: its array children concatenate across
+ * layers, every other child is plain last-wins.
  */
-export function getEffectiveConfig(db: Database, projectDir?: string): EffectiveConfigModel {
-  if (projectDir && !listProjectDirs(db).some(p => pathKey(p) === pathKey(projectDir))) {
-    throw new Error("projectDir is not one of the known projects");
+function concatParent(parts: PathMap[], key: string): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const pm of parts) {
+    const v = pm.paths.get(key);
+    if (!isPlainObject(v)) continue;
+    for (const [child, value] of Object.entries(v)) {
+      const prev = merged[child];
+      merged[child] = CONCAT_LEAF_KEYS.has(`${key}.${child}`) && Array.isArray(value)
+        ? [...(Array.isArray(prev) ? prev : []), ...value]
+        : value;
+    }
   }
+  return merged;
+}
 
-  const layers: ConfigLayerInfo[] = [readLayer(SETTINGS_PATH, "user")];
-  if (projectDir) {
-    layers.push(readLayer(join(projectDir, ".claude", "settings.json"), "project"));
-    layers.push(readLayer(join(projectDir, ".claude", "settings.local.json"), "local"));
-  }
-
+/**
+ * Merge already-read layers, lowest priority first. Pure — the file and DB
+ * reads live in getEffectiveConfig, so the merge rules are testable on their
+ * own.
+ */
+export function computeEffective(layers: ConfigLayerInfo[]): EffectiveConfigEntry[] {
   const pathMaps = layers.map(layer => {
     const paths = new Map<string, unknown>();
     for (const [k, v] of Object.entries(layer.raw)) {
@@ -88,16 +118,45 @@ export function getEffectiveConfig(db: Database, projectDir?: string): Effective
     const ignored = having
       .filter(pm => !levelHonored(key, pm.level) && pm.level !== winner.level)
       .map(pm => pm.level).sort(byRankDesc);
+    // `pool` is in layer order (user → project → local), i.e. ascending
+    // priority, which is exactly the order the accumulated keys concatenate in.
+    const accumulates = CONCAT_LEAF_KEYS.has(key) || CONCAT_PARENT_KEYS.has(key);
     effective.push({
       key,
-      value: winner.paths.get(key),
+      value: accumulates
+        ? (CONCAT_LEAF_KEYS.has(key) ? concatLeaf(pool, key) : concatParent(pool, key))
+        : winner.paths.get(key),
       source: winner.level,
-      overriddenLevels: overridden.length ? overridden : undefined,
+      overriddenLevels: !accumulates && overridden.length ? overridden : undefined,
+      mergedLevels: accumulates && pool.length > 1
+        ? pool.map(pm => pm.level).sort(byRankDesc) : undefined,
       ignoredLevels: ignored.length ? ignored : undefined,
       sourceIgnored: honored.length === 0 ? true : undefined,
     });
   }
 
   effective.sort((a, b) => a.key.localeCompare(b.key));
-  return { layers, effective };
+  return effective;
+}
+
+/**
+ * Read-only merged view of the settings layers (local > project > user):
+ * every top-level key plus one level of nested leaves, with the winning
+ * value, its source layer, which layers it overrides or accumulates across,
+ * and which definitions sit in layers the tool never reads.
+ */
+export function getEffectiveConfig(db: Database, projectDir?: string): EffectiveConfigModel {
+  if (projectDir && !listProjectDirs(db).some(p => pathKey(p) === pathKey(projectDir))) {
+    throw new Error("projectDir is not one of the known projects");
+  }
+
+  const layers: ConfigLayerInfo[] = [readLayer(SETTINGS_PATH, "user")];
+  // A project whose .claude IS ~/.claude contributes no layer of its own —
+  // reading it would compare the user layer against itself.
+  if (projectDir && !shadowsUserConfig(projectDir)) {
+    layers.push(readLayer(join(projectDir, ".claude", "settings.json"), "project"));
+    layers.push(readLayer(join(projectDir, ".claude", "settings.local.json"), "local"));
+  }
+
+  return { layers, effective: computeEffective(layers) };
 }

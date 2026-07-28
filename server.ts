@@ -10,6 +10,8 @@ import { settingsRouter } from "./src/api/settingsEndpoints";
 import { transcriptRouter } from "./src/api/transcriptEndpoints";
 import { providersRouter } from "./src/api/providersEndpoint";
 import { configRouter } from "./src/api/configEndpoints";
+import { mcpRouter, mcpInfoRouter } from "./src/api/mcpEndpoint";
+import { formatProvisionReport, provision } from "./src/provision";
 
 const argv = Bun.argv.slice(2);
 const PORT = parseInt(Bun.env["PORT"] ?? argv.find(a => a.startsWith("--port="))?.split("=")[1] ?? "5757", 10);
@@ -18,6 +20,7 @@ const PORT = parseInt(Bun.env["PORT"] ?? argv.find(a => a.startsWith("--port="))
 const HOST = Bun.env["HOST"] ?? argv.find(a => a.startsWith("--host="))?.split("=")[1] ?? "127.0.0.1";
 const NO_BROWSER  = argv.includes("--no-browser");
 const STATIC_ONLY = argv.includes("--static-only");
+const NO_PROVISION = argv.includes("--no-provision");
 
 mkdirSync(DATA_DIR, { recursive: true });
 
@@ -31,6 +34,23 @@ for (const provider of PROVIDERS) {
 console.log("[startup] done scanning");
 
 if (!STATIC_ONLY) startWatcher(db);
+
+// The MCP endpoint is always advertised on loopback, even when the server is
+// bound to 0.0.0.0 — clients on this machine connect to themselves, and the
+// registration written into each tool's config must not embed a LAN address.
+const MCP_URL = `http://127.0.0.1:${PORT}/mcp`;
+
+// Install the bundled usage-review skill and register this MCP endpoint with
+// every AI tool detected on this machine. Idempotent, so it self-heals after a
+// port change and stays silent once everything is in place.
+// Deliberately not awaited: registering with a tool shells out to its CLI, and
+// the dashboard should be serving before that finishes.
+if (!NO_PROVISION) {
+  void provision({ mcpUrl: MCP_URL })
+    .then(reports => { for (const line of formatProvisionReport(reports)) console.log(line); })
+    // Provisioning is a convenience — never let it stop the dashboard starting.
+    .catch(e => console.warn(`[provision] skipped: ${e instanceof Error ? e.message : String(e)}`));
+}
 
 if (!NO_BROWSER && !STATIC_ONLY) {
   const url = `http://localhost:${PORT}`;
@@ -48,6 +68,8 @@ app.route("/api/settings",  settingsRouter);
 app.route("/api/providers", providersRouter);
 app.route("/api/config",    configRouter);
 app.route("/api",           transcriptRouter);
+app.route("/mcp",           mcpRouter);
+app.route("/api/mcp-server", mcpInfoRouter);
 
 // hono's serveStatic root is resolved against the CWD, so a bare "./static"
 // 404s the whole UI whenever the app is started from anywhere but its own
@@ -59,5 +81,6 @@ const STATIC_ROOT = (relative(process.cwd(), STATIC_DIR) || ".").replace(/\\/g, 
 app.use("/*", serveStatic({ root: STATIC_ROOT }));
 
 console.log(`AI Insights → http://localhost:${PORT}`);
+console.log(`MCP server  → ${MCP_URL} (streamable HTTP, read-only)`);
 
 export default { port: PORT, hostname: HOST, fetch: app.fetch };

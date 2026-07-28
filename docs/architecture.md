@@ -8,6 +8,8 @@ How the app is put together, and where to plug in a new AI tool.
 - [Transcript providers](#transcript-providers)
 - [Config adapters (the Harness tabs)](#config-adapters-the-harness-tabs)
 - [Adding a new provider](#adding-a-new-provider)
+- [The MCP server](#the-mcp-server)
+- [Provisioning](#provisioning)
 - [MCP: why config files, not the CLI](#mcp-why-config-files-not-the-cli)
 - [Write safety](#write-safety)
 - [Network binding](#network-binding)
@@ -113,6 +115,18 @@ settings layering (local > project > user) including keys the tool only reads fr
 one layer (`autoMode`, `pluginConfigs` are user-only since Claude Code 2.1.207),
 and YAML frontmatter parsing with block scalars.
 
+Two layering rules that are not plain last-wins:
+
+- **Permission rules accumulate.** `permissions.allow` / `deny` / `ask` apply from
+  every layer at once, so `/api/config/effective` concatenates them and reports
+  `mergedLevels` rather than `overriddenLevels`. Sibling keys such as
+  `permissions.defaultMode` still override normally.
+- **A project whose `.claude` IS `~/.claude` contributes no layer.** That happens
+  whenever Claude Code runs with the home directory as cwd; reading it as a
+  project layer would compare the user layer against itself and double-count
+  every hook, skill and command. `shadowsUserConfig()` in
+  [`config/shared.ts`](../src/providers/claude-code/config/shared.ts) filters it out.
+
 ## Adding a new provider
 
 **Usage data (Dashboard, Runs, Run detail):**
@@ -128,7 +142,78 @@ and YAML frontmatter parsing with block scalars.
 1. Create a `ToolConfigAdapter` for the tool — implement only the capabilities that
    make sense for it.
 2. Register it in `CONFIG_ADAPTERS` in [`src/config/index.ts`](../src/config/index.ts).
-3. Nothing else. The tabs, routes and graph adapt to whatever `capabilities()` says.
+3. Nothing else. The tabs, routes, MCP tools and graph adapt to whatever
+   `capabilities()` says.
+
+**Provisioning (optional):** implement `isInstalled`, `installSkill` and
+`registerMcpServer` on the adapter and the bundled skill plus the MCP
+registration are pushed to that tool too. See [Provisioning](#provisioning).
+
+## The MCP server
+
+The app is both an MCP *client* (it probes your configured servers to list their
+tools, see below) and an MCP *server* (it exposes its own analytics). The two are
+unrelated code paths that happen to speak the same protocol.
+
+The server lives in [`src/mcp/`](../src/mcp/) and is split so that the protocol
+and the transports cannot drift apart:
+
+| File | Responsibility |
+|---|---|
+| `src/mcp/tools.ts` | Tool registry. Each tool calls the same library function the matching HTTP route calls — one implementation, two front doors |
+| `src/mcp/protocol.ts` | Transport-independent JSON-RPC dispatch: `initialize`, `tools/list`, `tools/call`, `ping` |
+| `src/api/mcpEndpoint.ts` | Streamable HTTP transport, mounted at `/mcp` on the dashboard's own port |
+| `mcp-stdio.ts` | stdio transport for clients that only launch subprocesses |
+
+Three design decisions worth knowing:
+
+**Stateless.** No `Mcp-Session-Id` is issued and each POST is answered with a
+single `application/json` body rather than an SSE stream. The server holds no
+per-client state and never initiates messages, so sessions would buy nothing and
+cost a class of expiry bugs. Both choices are explicitly permitted by the spec.
+
+**Read-only.** No tool wraps a write route. The write paths edit CLAUDE.md, hook
+scripts and skills — changes that must go through a human. Recommendations come
+back as text and the user's assistant applies them with its own permission-gated
+edit tools.
+
+**Protocol hand-rolled, not vendored.** The wire format is ~200 lines of JSON-RPC
+against Bun's `fetch` handler. The official SDK's HTTP transport expects Node
+`IncomingMessage`/`ServerResponse` objects, which Hono on Bun does not have;
+adapting it is more fragile than implementing the three methods this server
+answers. `src/mcp/protocol.test.ts` pins the wire shape.
+
+## Provisioning
+
+On startup the app installs its own assets into whichever AI tools are present on
+the machine: the `ai-usage-review` skill, and a registration for its own MCP
+endpoint. [`src/provision.ts`](../src/provision.ts) is provider-agnostic — it
+loops `CONFIG_ADAPTERS` and calls three optional adapter methods:
+
+```ts
+isInstalled?(): boolean;                                  // is this tool on this machine?
+installSkill?(pkg: SkillPackage): ProvisionResult;        // write into its skills dir
+registerMcpServer?(s: McpServerRegistration): Promise<ProvisionResult>;
+```
+
+An adapter that omits them is simply not provisioned, so adding a second tool
+means implementing the three methods inside its own folder — nothing outside
+`src/providers/<id>/` changes.
+
+Skill assets ship as real markdown under [`assets/skills/`](../assets/skills/),
+resolved next to the executable exactly like `static/`, so they stay reviewable
+and editable rather than being inlined into TypeScript string literals.
+
+**Why `claude mcp add` and not a direct file write.** The Claude Code adapter
+shells out to the tool's own CLI to register the server. `~/.claude.json` also
+holds per-project session state and can be megabytes; a read-modify-write from
+this process would race a running Claude Code and could clobber it. The adapter
+only ever *reads* that file, to decide whether registration is already correct.
+When the CLI isn't runnable, provisioning prints the exact command instead of
+guessing.
+
+Every step is idempotent and compares before writing, so the second run is a
+no-op that logs nothing. `--no-provision` opts out entirely.
 
 ## MCP: why config files, not the CLI
 

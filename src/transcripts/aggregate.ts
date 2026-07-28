@@ -54,6 +54,30 @@ export interface ModelStat {
 }
 
 /**
+ * Optional data-source filter carried by every read query.
+ *
+ * `null`/`undefined` means "every registered provider" — what the API exposes
+ * as `?provider=all`. Any other value is matched against the `provider` column
+ * that every table carries, so a future Codex/OpenCode adapter is filterable
+ * without touching a single query here.
+ */
+export type ProviderFilter = string | null | undefined;
+
+/** Bind values these queries use. Matches bun:sqlite's accepted bindings. */
+type BindParams = (string | number)[];
+
+/**
+ * Build the `AND <alias>provider = ?` fragment for a filter, appending its
+ * bind value to `params`. Returns "" when no filter is active so the surrounding
+ * SQL stays unchanged.
+ */
+function providerAnd(provider: ProviderFilter, params: BindParams, alias = ""): string {
+  if (!provider) return "";
+  params.push(provider);
+  return ` AND ${alias}provider = ?`;
+}
+
+/**
  * ISO timestamp of local midnight n days ago. Turn timestamps are stored as
  * UTC ISO strings, so comparing against a bare "YYYY-MM-DD" would cut days at
  * UTC midnight — hours off for any non-UTC user. Anchoring to local midnight
@@ -66,19 +90,21 @@ export function localMidnightIso(daysAgo = 0): string {
   return d.toISOString();
 }
 
-export function getTotals(db: Database, sinceDate?: string): TurnTotals {
-  const where = sinceDate ? `WHERE ts >= '${sinceDate}'` : "";
+export function getTotals(db: Database, sinceDate?: string, provider?: ProviderFilter): TurnTotals {
+  // Empty `since` compares <= every ISO timestamp, i.e. no filter.
+  const params: BindParams = [sinceDate ?? ""];
+  const provAnd = providerAnd(provider, params);
   const row = db.query<{
     input: number; cw5m: number; cw1h: number; cr: number; out: number;
-  }, []>(
+  }, BindParams>(
     `SELECT
        SUM(input_tokens) as input,
        SUM(cache_create_5m) as cw5m,
        SUM(cache_create_1h) as cw1h,
        SUM(cache_read) as cr,
        SUM(output_tokens) as out
-     FROM turns ${where}`
-  ).get();
+     FROM turns WHERE ts >= ?${provAnd}`
+  ).get(...params);
 
   const input  = row?.input  ?? 0;
   const cw5m   = row?.cw5m   ?? 0;
@@ -87,7 +113,7 @@ export function getTotals(db: Database, sinceDate?: string): TurnTotals {
   const output = row?.out    ?? 0;
   const total  = input + cw5m + cw1h + cr + output;
 
-  const byModel = getModelStats(db, sinceDate);
+  const byModel = getModelStats(db, sinceDate, provider);
   const totalCost = byModel.reduce((sum, m) => {
     const c = computeCost(m.model, m.input, m.output, m.cacheCreate5m, m.cacheCreate1h, m.cacheRead);
     return sum + c.total;
@@ -132,9 +158,11 @@ function bucketExpr(range: RangeKey): string {
 }
 
 /** Token series bucketed to match the range: 5-min / hourly / daily. */
-export function getRangeSeries(db: Database, range: RangeKey): DailyStat[] {
+export function getRangeSeries(db: Database, range: RangeKey, provider?: ProviderFilter): DailyStat[] {
   const bucket = bucketExpr(range);
-  return db.query<DailyStat, [string]>(
+  const params: BindParams = [rangeSinceIso(range)];
+  const provAnd = providerAnd(provider, params);
+  return db.query<DailyStat, BindParams>(
     `SELECT
        ${bucket} as date,
        SUM(input_tokens)    as input,
@@ -143,15 +171,16 @@ export function getRangeSeries(db: Database, range: RangeKey): DailyStat[] {
        SUM(cache_read)      as cacheRead,
        SUM(output_tokens)   as output,
        SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-     FROM turns WHERE ts >= ?
+     FROM turns WHERE ts >= ?${provAnd}
      GROUP BY ${bucket}
      ORDER BY MIN(ts)`
-  ).all(rangeSinceIso(range));
+  ).all(...params);
 }
 
-export function getDailySeries(db: Database, days = 30): DailyStat[] {
-  const since = localMidnightIso(days);
-  return db.query<DailyStat, [string]>(
+export function getDailySeries(db: Database, days = 30, provider?: ProviderFilter): DailyStat[] {
+  const params: BindParams = [localMidnightIso(days)];
+  const provAnd = providerAnd(provider, params);
+  return db.query<DailyStat, BindParams>(
     `SELECT
        date(ts, 'localtime') as date,
        SUM(input_tokens)    as input,
@@ -160,16 +189,18 @@ export function getDailySeries(db: Database, days = 30): DailyStat[] {
        SUM(cache_read)      as cacheRead,
        SUM(output_tokens)   as output,
        SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-     FROM turns WHERE ts >= ?
+     FROM turns WHERE ts >= ?${provAnd}
      GROUP BY date(ts, 'localtime')
      ORDER BY date`
-  ).all(since);
+  ).all(...params);
 }
 
-export function getModelStats(db: Database, sinceDate?: string): ModelStat[] {
+export function getModelStats(db: Database, sinceDate?: string, provider?: ProviderFilter): ModelStat[] {
   // Parameterized because /api/models passes the caller-supplied `since`
   // straight through; empty string compares <= every ISO ts, i.e. no filter.
-  return db.query<ModelStat, [string]>(
+  const params: BindParams = [sinceDate ?? ""];
+  const provAnd = providerAnd(provider, params);
+  return db.query<ModelStat, BindParams>(
     `SELECT
        COALESCE(model, 'unknown') as model,
        SUM(input_tokens)    as input,
@@ -178,19 +209,20 @@ export function getModelStats(db: Database, sinceDate?: string): ModelStat[] {
        SUM(cache_read)      as cacheRead,
        SUM(output_tokens)   as output,
        SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-     FROM turns WHERE ts >= ?
+     FROM turns WHERE ts >= ?${provAnd}
      GROUP BY model
      ORDER BY total DESC`
-  ).all(sinceDate ?? "");
+  ).all(...params);
 }
 
 export function getAgents(db: Database, opts: {
-  limit?: number; offset?: number; project?: string; search?: string;
+  limit?: number; offset?: number; project?: string; search?: string; provider?: ProviderFilter;
 } = {}): { rows: AgentSummaryRow[]; total: number } {
-  const { limit = 50, offset = 0, project, search } = opts;
+  const { limit = 50, offset = 0, project, search, provider } = opts;
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
+  if (provider) { conditions.push("a.provider = ?"); params.push(provider); }
   if (project) { conditions.push("a.cwd = ?"); params.push(project); }
   if (search) { conditions.push("(a.title LIKE ? OR a.cwd LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
 
@@ -233,12 +265,16 @@ export function getAgents(db: Database, opts: {
   return { rows, total: countRow?.n ?? 0 };
 }
 
-export function getProjects(db: Database, since?: string): {
+export function getProjects(db: Database, since?: string, provider?: ProviderFilter): {
   cwd: string; runCount: number; agentCount: number; totalTokens: number; lastActive: string | null;
 }[] {
+  // The token sub-query is filtered by `since`; the agent side carries the
+  // provider filter so projects belonging to another tool drop out entirely.
+  const params: BindParams = [since ?? ""];
+  const provAnd = providerAnd(provider, params, "a.");
   return db.query<{
     cwd: string; runCount: number; agentCount: number; totalTokens: number; lastActive: string | null;
-  }, [string]>(
+  }, BindParams>(
     `SELECT
        a.cwd,
        COUNT(DISTINCT a.run_id) as runCount,
@@ -251,10 +287,10 @@ export function getProjects(db: Database, since?: string): {
          SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
        FROM turns WHERE ts >= ? GROUP BY agent_id
      ) t ON a.agent_id = t.agent_id
-     WHERE a.cwd IS NOT NULL
+     WHERE a.cwd IS NOT NULL${provAnd}
      GROUP BY a.cwd
      ORDER BY lastActive DESC NULLS LAST`
-  ).all(since ?? "");
+  ).all(...params);
 }
 
 // ===== MCP / Skill usage from the recorded tool-event stream =====
@@ -268,13 +304,15 @@ export interface McpUsageStat {
   tools: { tool: string; calls: number; tokens: number }[];
 }
 
-export function getMcpUsage(db: Database, since: string): McpUsageStat[] {
-  const rows = db.query<{ detail: string; calls: number; tokens: number }, [string]>(
+export function getMcpUsage(db: Database, since: string, provider?: ProviderFilter): McpUsageStat[] {
+  const params: BindParams = [since];
+  const provAnd = providerAnd(provider, params);
+  const rows = db.query<{ detail: string; calls: number; tokens: number }, BindParams>(
     `SELECT detail, COUNT(*) as calls, SUM(tokens) as tokens
      FROM events
-     WHERE kind = 'tool' AND detail LIKE 'mcp\\_\\_%' ESCAPE '\\' AND ts >= ?
+     WHERE kind = 'tool' AND detail LIKE 'mcp\\_\\_%' ESCAPE '\\' AND ts >= ?${provAnd}
      GROUP BY detail`
-  ).all(since);
+  ).all(...params);
 
   const byServer = new Map<string, McpUsageStat>();
   for (const r of rows) {
@@ -300,49 +338,64 @@ export interface SkillUsageStat {
   tokens: number;
 }
 
-export function getSkillUsage(db: Database, since: string): SkillUsageStat[] {
-  return db.query<SkillUsageStat, [string]>(
+export function getSkillUsage(db: Database, since: string, provider?: ProviderFilter): SkillUsageStat[] {
+  const params: BindParams = [since];
+  const provAnd = providerAnd(provider, params);
+  return db.query<SkillUsageStat, BindParams>(
     `SELECT extra as skill, COUNT(*) as calls, SUM(tokens) as tokens
      FROM events
-     WHERE kind = 'tool' AND detail = 'Skill' AND extra IS NOT NULL AND ts >= ?
+     WHERE kind = 'tool' AND detail = 'Skill' AND extra IS NOT NULL AND ts >= ?${provAnd}
      GROUP BY extra
      ORDER BY tokens DESC`
-  ).all(since);
+  ).all(...params);
 }
 
-export function getCacheHitRate(db: Database, sinceDate?: string): number {
-  const where = sinceDate ? `WHERE ts >= '${sinceDate}'` : "";
-  const row = db.query<{ cr: number; total: number }, []>(
+export function getCacheHitRate(db: Database, sinceDate?: string, provider?: ProviderFilter): number {
+  const params: BindParams = [sinceDate ?? ""];
+  const provAnd = providerAnd(provider, params);
+  const row = db.query<{ cr: number; total: number }, BindParams>(
     `SELECT SUM(cache_read) as cr,
             SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read) as total
-     FROM turns ${where}`
-  ).get();
+     FROM turns WHERE ts >= ?${provAnd}`
+  ).get(...params);
   if (!row || !row.total) return 0;
   return Math.round((row.cr / row.total) * 100);
 }
 
-export function getTopTurns(db: Database, limit = 10): {
+export function getTopTurns(db: Database, limit = 10, provider?: ProviderFilter): {
   agent_id: string; ts: string; model: string | null; total: number;
 }[] {
-  return db.query<{ agent_id: string; ts: string; model: string | null; total: number }, [number]>(
+  const params: BindParams = [""];
+  const provAnd = providerAnd(provider, params);
+  params.push(limit);
+  return db.query<{ agent_id: string; ts: string; model: string | null; total: number }, BindParams>(
     `SELECT agent_id, ts, model,
        (input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
-     FROM turns ORDER BY total DESC LIMIT ?`
-  ).all(limit);
+     FROM turns WHERE ts >= ?${provAnd} ORDER BY total DESC LIMIT ?`
+  ).all(...params);
 }
 
-export function getAgentCount(db: Database, sinceDate?: string): number {
-  const where = sinceDate ? `WHERE started_at >= '${sinceDate}'` : "";
-  const row = db.query<{ n: number }, []>(
-    `SELECT COUNT(*) as n FROM agents ${where}`
-  ).get();
+/**
+ * Row counts. `started_at` is nullable, and `NULL >= x` is NULL in SQL, so the
+ * date predicate is added only when a window was asked for — otherwise rows
+ * that never got a timestamp would silently drop out of the count.
+ */
+function countRows(db: Database, table: "agents" | "runs", sinceDate?: string, provider?: ProviderFilter): number {
+  const params: BindParams = [];
+  const conditions: string[] = [];
+  if (sinceDate) { conditions.push("started_at >= ?"); params.push(sinceDate); }
+  if (provider)  { conditions.push("provider = ?");    params.push(provider); }
+  const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
+  const row = db.query<{ n: number }, BindParams>(
+    `SELECT COUNT(*) as n FROM ${table}${where}`
+  ).get(...params);
   return row?.n ?? 0;
 }
 
-export function getRunCount(db: Database, sinceDate?: string): number {
-  const where = sinceDate ? `WHERE started_at >= '${sinceDate}'` : "";
-  const row = db.query<{ n: number }, []>(
-    `SELECT COUNT(*) as n FROM runs ${where}`
-  ).get();
-  return row?.n ?? 0;
+export function getAgentCount(db: Database, sinceDate?: string, provider?: ProviderFilter): number {
+  return countRows(db, "agents", sinceDate, provider);
+}
+
+export function getRunCount(db: Database, sinceDate?: string, provider?: ProviderFilter): number {
+  return countRows(db, "runs", sinceDate, provider);
 }

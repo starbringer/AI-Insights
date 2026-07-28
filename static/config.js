@@ -895,7 +895,8 @@ async function renderEffectiveConfigs(project) {
         <td>${scopeBadge(e.source)}${e.sourceIgnored ? ' <span class="status-warn" title="Every definition of this key sits in a layer the tool does not read — it never takes effect">⚠ ignored</span>' : ''}</td>
         <td class="td-dim" style="font-size:11px">
           ${e.overriddenLevels?.length ? `overrides ${e.overriddenLevels.join(', ')}` : ''}
-          ${e.ignoredLevels?.length ? `${e.overriddenLevels?.length ? ' · ' : ''}also set in ${e.ignoredLevels.join(', ')} (not read there)` : ''}
+          ${e.mergedLevels?.length ? `<span title="Claude Code accumulates this key across layers — every rule listed here is in force">combined from ${e.mergedLevels.join(' + ')} (all apply)</span>` : ''}
+          ${e.ignoredLevels?.length ? `${e.overriddenLevels?.length || e.mergedLevels?.length ? ' · ' : ''}also set in ${e.ignoredLevels.join(', ')} (not read there)` : ''}
         </td>
       </tr>`).join('')}</tbody>
     </table>` : '<p class="text-dim" style="padding:16px 0">No settings found in these layers.</p>'}

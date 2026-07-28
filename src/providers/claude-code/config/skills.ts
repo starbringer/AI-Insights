@@ -4,7 +4,7 @@ import type { Database } from "bun:sqlite";
 import { countTokens } from "../../../tokenizer";
 import { SKILLS_DIR } from "../../../paths";
 import type { SkillDetail, SkillTrigger } from "../../../config/types";
-import { listProjectDirs, parseFrontmatter, enabledPluginDirs, markOverrides, pathKey } from "./shared";
+import { listConfigLayerDirs, parseFrontmatter, enabledPluginDirs, markOverrides, pathKey } from "./shared";
 
 const ACTION_WORDS = ["create", "generate", "build", "analyze", "convert", "transform", "export",
   "import", "update", "fix", "debug", "test", "deploy", "review", "plan", "design"];
@@ -94,7 +94,7 @@ export function listSkills(db: Database): SkillDetail[] {
 
   const out: SkillDetail[] = [];
   scanSkillRoot(SKILLS_DIR, { source: "user" }, usage, out);
-  for (const dir of listProjectDirs(db)) {
+  for (const dir of listConfigLayerDirs(db)) {
     scanSkillRoot(join(dir, ".claude", "skills"), { source: "project", projectDir: dir }, usage, out);
   }
   for (const { dir, plugin } of enabledPluginDirs("skills")) {

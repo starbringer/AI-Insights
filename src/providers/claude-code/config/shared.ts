@@ -29,6 +29,21 @@ export function listProjectDirs(db: Database): string[] {
 }
 
 /**
+ * True when a project's own `.claude` dir IS the user-level `~/.claude` dir —
+ * what happens whenever Claude Code runs with the home directory as cwd.
+ * Reading such a project's "project layer" re-reads the user layer, so every
+ * hook, skill and command shows up twice and appears to shadow itself.
+ */
+export function shadowsUserConfig(projectDir: string): boolean {
+  return pathKey(join(projectDir, ".claude")) === pathKey(CLAUDE_DIR);
+}
+
+/** Project dirs that contribute a config layer of their own. */
+export function listConfigLayerDirs(db: Database): string[] {
+  return listProjectDirs(db).filter(dir => !shadowsUserConfig(dir));
+}
+
+/**
  * Minimal YAML-ish frontmatter parser: flat `key: value` lines, CRLF-tolerant,
  * plus block scalars (`key: >` / `key: |`) folded from the indented lines that
  * follow — skills commonly write multi-line descriptions that way.
