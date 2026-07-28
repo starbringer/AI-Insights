@@ -72,7 +72,7 @@ UI 的所有操作都经由这些路由，因此它们同时也是可供脚本�
 | `GET /api/config/mcp` | MCP 服务器、探测状态、工具、schema、诊断 |
 | `GET /api/config/memory` | 按项目的记忆库 |
 | `GET /api/config/effective` | 合并后的设置层；`?project=` 选择项目层。Claude Code 会累加而非覆盖的键（`permissions.allow` / `deny` / `ask`）返回各层规则的拼接结果，并带 `mergedLevels` 而非 `overriddenLevels` |
-| `GET /api/config/dependencies` | 依赖图：节点、边、工作流链、统计 |
+| `GET /api/config/dependencies` | 依赖图：节点、边、依赖链、统计。为 Skills 与 MCP 标签页的「关联组件」提供数据 |
 
 写入类路由只接受对应列表接口枚举过的路径 —— 见
 [架构 › 写入安全](architecture.zh-CN.md#写入安全)。

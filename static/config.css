@@ -189,17 +189,12 @@
 .cfg-layer-file { display: flex; align-items: center; gap: 9px; font-size: 12px; min-width: 0; }
 .cfg-layer-file code { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* --- dependency graph chains --- */
-.cfg-chain { padding: 10px 0 4px; border-top: 1px solid var(--border); margin-top: 10px; }
-.cfg-chain:first-of-type { border-top: none; margin-top: 4px; }
-.cfg-chain-key { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px; }
+/* --- "Related components": the dependency cluster around a skill / server --- */
+.cfg-related:not(:empty) { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
 .cfg-chain-step { display: flex; align-items: baseline; gap: 9px; margin: 5px 0; font-size: 12px; min-width: 0; }
-.cfg-chain-num {
-  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 10.5px; font-weight: 700;
-}
-.cfg-chain-icon { color: var(--text-dim); width: 14px; text-align: center; flex-shrink: 0; }
+.cfg-chain-step > code { white-space: nowrap; flex-shrink: 0; }
+.cfg-chain-step-self { font-weight: 600; }
+.cfg-chain-icon { width: 14px; text-align: center; flex-shrink: 0; }
 .cfg-chain-desc { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* --- run detail: Tree | Usage view tabs (top of the middle column) --- */

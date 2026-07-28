@@ -65,10 +65,12 @@ function cfgError(rootId, e) {
 
 // ===== Capabilities-driven nav =====
 
+// `dependencies` is deliberately absent: it has no tab of its own. It feeds the
+// "Related components" section inside the Skills and MCP tabs instead.
 const CAP_TO_TAB = {
   instructions: 'claudemd', commands: 'commands', skills: 'skills', hooks: 'hooks',
   permissions: 'permissions', mcp: 'mcp', memory: 'memory',
-  effectiveConfig: 'configs', dependencies: 'workflow',
+  effectiveConfig: 'configs',
 };
 
 let configCaps = {};
@@ -426,10 +428,12 @@ function renderSkillDetail(idx) {
         <div class="cfg-file-chips">${s.scripts.map(f => `<span class="cfg-chip" title="Bundled script the skill can run: scripts/${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}
       ${s.references.length ? `<div class="cfg-section-label text-dim">References</div>
         <div class="cfg-file-chips">${s.references.map(f => `<span class="cfg-chip" title="Reference file loaded on demand: references/${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}
+      <div id="skill-related" class="cfg-related"></div>
       <textarea id="skill-editor" class="cfg-editor" spellcheck="false" ${s.editable ? '' : 'readonly'}></textarea>
     </div>`;
   el.scrollTop = 0;
   document.getElementById('skill-editor').value = s.content;
+  renderRelatedComponents('skill-related', `skill:${s.name}`);
   document.getElementById('skill-save')?.addEventListener('click', async () => {
     try {
       await apiPut(`/config/skills/file${pq()}`, { path: s.path, content: document.getElementById('skill-editor').value });
@@ -669,6 +673,7 @@ function renderMcpDetail(idx) {
           · <span title="Schema tokens × ${d.agents30d ?? 0} agents in the last 30 days — an upper bound of what this server's schemas injected">≈${fmt.tokens(est30d)} injected / 30d</span>` : ''}
       </div>
       ${s.probeError ? `<div class="cfg-mcp-error text-dim" style="margin:6px 0 0">${esc(s.probeError)}</div>` : ''}
+      <div id="mcp-related" class="cfg-related"></div>
       ${s.tools?.length ? `
         <div class="cfg-section-label text-dim">Tools</div>
         <div class="cfg-mcp-tools" style="margin-left:0">
@@ -682,6 +687,7 @@ function renderMcpDetail(idx) {
         </div>` : ''}
     </div>`;
   el.scrollTop = 0;
+  renderRelatedComponents('mcp-related', `mcp:${s.name}`);
 }
 
 // ===== Permissions =====
@@ -910,7 +916,7 @@ async function renderEffectiveConfigs(project) {
 
 const GRAPH_CAT_COLOR = { skill: '#5f93d1', hook: '#a98cd6', mcp: '#5fb98f', command: '#e3a838' };
 const GRAPH_TYPE_ICON = { hook: '⚡', mcp: '⇄', skill: '❖', command: '/' };
-// Columns run in workflow order, so the graph always reads left to right.
+// Columns run hook → MCP → skill → command, so the graph reads left to right.
 const GRAPH_LAYERS = ['hook', 'mcp', 'skill', 'command'];
 const GRAPH_TYPE_DESC = {
   hook: 'Hook — fires on its event and runs its actions',
@@ -919,67 +925,56 @@ const GRAPH_TYPE_DESC = {
   command: 'Slash command — user-invoked shortcut',
 };
 
-const graphState = { data: null, selected: -1 };
+// The dependency graph is fetched once and shared by the Skills and MCP tabs,
+// which each show the cluster of components around the item you selected. The
+// cache is keyed by provider so switching Source can't serve the old tool's
+// graph, and a failed fetch is evicted so the next panel retries.
+let depGraphCache = { key: null, promise: null };
 
-async function loadWorkflowTab() {
-  const root = document.getElementById('cfg-workflow-root');
-  root.innerHTML = '<div class="skeleton-card skeleton" style="height:280px"></div>';
+function loadDependencyGraph() {
+  const key = pq();
+  if (depGraphCache.key !== key || !depGraphCache.promise) {
+    const promise = api(`/config/dependencies${key}`);
+    promise.catch(() => { if (depGraphCache.promise === promise) depGraphCache.promise = null; });
+    depGraphCache = { key, promise };
+  }
+  return depGraphCache.promise;
+}
+
+/**
+ * Render "Related components" for one node into `hostId`: the cluster it belongs
+ * to, drawn as a graph plus the ordered step list. No-ops quietly when the node
+ * has no relationships, so a standalone skill or server just shows nothing.
+ */
+async function renderRelatedComponents(hostId, nodeId) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  if (!configCaps.dependencies) { host.innerHTML = ''; return; }
   let g;
-  try { g = await api(`/config/dependencies${pq()}`); }
-  catch (e) { return cfgError('cfg-workflow-root', e); }
+  try { g = await loadDependencyGraph(); }
+  catch { host.innerHTML = ''; return; }
+  // Selecting another item rebuilds the panel, so the node we captured may now
+  // be detached — writing into it would silently lose the render. Whichever
+  // call owns the live node finishes; older ones bail out.
+  if (document.getElementById(hostId) !== host) return;
 
-  graphState.data = g;
-  graphState.selected = g.chains.length ? 0 : -1;
-
-  if (!g.chains.length) {
-    root.innerHTML = '<p class="text-dim" style="padding:16px 0">No cross-component workflows detected. Workflows appear when a skill/command/hook references an MCP server or another component by name or in its content.</p>';
+  const chain = g.chains.find(c => c.steps.some(s => `${s.type}:${s.name}` === nodeId));
+  if (!chain) {
+    host.innerHTML = `<div class="cfg-section-label text-dim">Related components</div>
+      <p class="text-dim" style="margin:2px 0 0;font-size:12.5px">Nothing references this and it references nothing — it stands alone in your config.</p>`;
     return;
   }
-
-  root.innerHTML = `
-    <div class="cfg-split cfg-split-narrow">
-      <aside class="cfg-list" id="graph-chain-list"></aside>
-      <div id="graph-detail"></div>
-    </div>`;
-
-  renderGraphChainList();
-  renderGraphDetail(0);
+  renderClusterGraph(host, g, chain, nodeId);
 }
 
-function renderGraphChainList() {
-  const g = graphState.data;
-  const el = document.getElementById('graph-chain-list');
-  el.innerHTML = g.chains.map((c, i) => {
-    const typeIcons = [...new Set(c.steps.map(s => s.type))]
-      .map(t => `<span title="${esc(GRAPH_TYPE_DESC[t])}">${GRAPH_TYPE_ICON[t]}</span>`).join(' ');
-    return `<div class="cfg-list-item ${graphState.selected === i ? 'active' : ''}" data-idx="${i}">
-      <div class="cfg-list-title">${esc(c.key)}</div>
-      <div class="cfg-list-meta text-dim">${typeIcons} · ${c.steps.length} step${c.steps.length !== 1 ? 's' : ''}</div>
-    </div>`;
-  }).join('');
-  el.querySelectorAll('.cfg-list-item').forEach(item => {
-    item.addEventListener('click', () => {
-      graphState.selected = Number(item.dataset.idx);
-      renderGraphChainList();
-      renderGraphDetail(graphState.selected);
-    });
-  });
-}
-
-function renderGraphDetail(sel) {
-  const g = graphState.data;
-  const el = document.getElementById('graph-detail');
-  const chain = g.chains[sel];
-  if (!chain) { el.innerHTML = ''; return; }
-
-  // Subset of nodes/edges for the selected workflow.
+function renderClusterGraph(host, g, chain, focusId) {
   const chainIds = new Set(chain.steps.map(s => `${s.type}:${s.name}`));
   const nodes = g.nodes.filter(n => chainIds.has(n.id));
   const edges = g.edges.filter(e => chainIds.has(e.source) && chainIds.has(e.target));
 
   // Deterministic column layout instead of a force simulation: nodes are grouped
-  // into one column per type in workflow order, so nothing overlaps, the same
-  // workflow always draws the same way, and a big graph just gets taller.
+  // into one column per type, so nothing overlaps, the same set always draws the
+  // same way, and a big cluster just gets taller.
   const columns = GRAPH_LAYERS
     .map(type => nodes.filter(n => n.type === type).sort((a, b) => a.name.localeCompare(b.name)))
     .filter(col => col.length);
@@ -991,22 +986,20 @@ function renderGraphDetail(sel) {
     pos.set(n.id, { x: ci * COL_W, y: (ri - (col.length - 1) / 2) * ROW_H });
   }));
 
-  el.innerHTML = `
-    <div class="chart-card">
-      <div class="chart-card-title">Workflow: ${esc(chain.key)}
-        <span class="title-note" title="Components are grouped into a column per type and flow left to right. An arrow points from the component that references another to the one it references. Solid edges: one component's content literally names the other. Dashed edges: the names share a keyword (weaker signal). Hover any node or edge for detail.">solid = content reference · dashed = name similarity · hover for detail</span></div>
-      <div id="chart-cfg-graph"></div>
-    </div>
-    <div class="chart-card" style="margin-top:14px">
-      <div class="chart-card-title">Steps</div>
-      ${chain.steps.map((s, i) => `<div class="cfg-chain-step">
-        <span class="cfg-chain-num" style="background:${GRAPH_CAT_COLOR[s.type]}22;color:${GRAPH_CAT_COLOR[s.type]}" title="Step ${i + 1} in the workflow">${i + 1}</span>
-        <span class="cfg-chain-icon" title="${esc(GRAPH_TYPE_DESC[s.type] ?? s.type)}">${GRAPH_TYPE_ICON[s.type] ?? '·'}</span>
+  const chartId = `${host.id}-chart`;
+  host.innerHTML = `
+    <div class="cfg-section-label text-dim">Related components
+      <span class="title-note" title="Components are grouped into a column per type. An arrow points from the component that references another to the one it references. Solid edges: one component's content literally names the other. Dashed edges: the names share a keyword (weaker signal). Hover any node or edge for detail.">solid = content reference · dashed = name similarity · hover for detail</span></div>
+    <div id="${chartId}"></div>
+    ${chain.steps.map(s => {
+      const id = `${s.type}:${s.name}`;
+      return `<div class="cfg-chain-step${id === focusId ? ' cfg-chain-step-self' : ''}">
+        <span class="cfg-chain-icon" style="color:${GRAPH_CAT_COLOR[s.type]}" title="${esc(GRAPH_TYPE_DESC[s.type] ?? s.type)}">${GRAPH_TYPE_ICON[s.type] ?? '·'}</span>
         <code>${esc(s.name)}</code>
+        ${id === focusId ? '<span class="cfg-badge cfg-badge-plain" title="The item you have selected">this one</span>' : ''}
         <span class="text-dim cfg-chain-desc" title="${esc(s.description)}">${esc(s.description)}</span>
-      </div>`).join('')}
-    </div>`;
-  el.scrollTop = 0;
+      </div>`;
+    }).join('')}`;
 
   const degree = new Map();
   for (const e of edges) {
@@ -1017,15 +1010,20 @@ function renderGraphDetail(sel) {
   // ECharts fits the node bounding box into the canvas with one uniform scale,
   // so the canvas has to be sized to that same scale or the graph floats in a
   // sea of dead space. Width is the binding constraint (labels need the room);
-  // never scale above 1, so a two-node workflow keeps its natural spacing.
-  const box = document.getElementById('chart-cfg-graph');
+  // never scale above 1, so a two-node cluster keeps its natural spacing.
+  const box = document.getElementById(chartId);
   const spanX = (columns.length - 1) * COL_W;
   const spanY = (rows - 1) * ROW_H;
-  const scale = spanX > 0 ? Math.min(1, Math.max(180, box.clientWidth - 80) / spanX) : 1;
-  box.style.height = `${Math.max(260, Math.round(spanY * scale) + 120)}px`;
+  // Cap the canvas width too: ECharts always fills its box, so a two-column
+  // cluster in a wide panel would otherwise stretch to the full width. The
+  // slack left over is what keeps the outermost labels from clipping.
+  box.style.maxWidth = `${spanX + 340}px`;
+  const avail = Math.max(180, Math.min(box.clientWidth, spanX + 340) - 80);
+  const scale = spanX > 0 ? Math.min(1, avail / spanX) : 1;
+  box.style.height = `${Math.max(220, Math.round(spanY * scale) + 110)}px`;
 
   const cats = ['skill', 'hook', 'mcp', 'command'];
-  const chart = initChart('chart-cfg-graph');
+  const chart = initChart(chartId);
   if (!chart) return;
   if (!nodes.length) return renderChartEmpty(chart, 'No components');
   const t = chartTheme();
@@ -1045,6 +1043,8 @@ function renderGraphDetail(sel) {
         categoryName: n.type,
         detail: n.detail ? String(n.detail).slice(0, 120) : undefined,
         symbolSize: 13 + Math.min(15, (degree.get(n.id) ?? 0) * 3),
+        // Ring the item whose panel this is, so you can find yourself in the cluster.
+        itemStyle: n.id === focusId ? { borderColor: t.text, borderWidth: 2.5 } : undefined,
         // The name sits below the node on an opaque chip in full-strength text
         // colour, so neither the node fill nor a crossing edge can wash it out.
         label: {
@@ -1082,5 +1082,4 @@ window.ConfigPages = {
   permissions: loadPermissionsTab,
   memory: loadMemoryTab,
   configs: loadConfigsTab,
-  workflow: loadWorkflowTab,
 };

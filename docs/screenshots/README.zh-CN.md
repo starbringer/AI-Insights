@@ -17,10 +17,10 @@
 | hook 脚本文件名 | `format-on-save.ps1`、`notify-done.ps1`… |
 | 记忆主题及其内容 | `build-pipeline-notes`、填充正文 |
 | 权限规则限定符 | `Bash(npm run build:*)`、`Read(src/**)`… |
-| 工作流链名称 | `research`、`release`… |
+| 依赖链名称 | `research`、`release`… |
 | 残留的绝对路径、邮箱 | `C:\dev\workspace\file.ext`、`dev@example.com` |
 
-映射是确定性的（同一个真实值始终对应同一个替身），因此交叉引用 —— 比如工作流图中
+映射是确定性的（同一个真实值始终对应同一个替身），因此交叉引用 —— 比如依赖图中
 提到的某个 skill，或同时出现在 Runs 表格和图表里的某个项目 —— 在各页面之间保持一致。
 
 Token 计数、成本、时间戳、模型名称以及全部结构性元数据都是真实的。
@@ -34,13 +34,12 @@ Token 计数、成本、时间戳、模型名称以及全部结构性元数据�
 | `05-run-detail-usage.png` | 运行详情 —— 成本拆解（Usage 视图） |
 | `06-claudemd.png` | CLAUDE.md —— 指令文件、注入时间线、编辑器 |
 | `07-commands.png` | Commands —— 跨用户 / 项目 / 插件来源的斜杠命令 |
-| `08-skills.png` | Skills —— 列表 + 详情，含触发分析与编辑器 |
+| `08-skills.png` | Skills —— 列表 + 详情，含触发分析、关联组件与编辑器 |
 | `09-hooks.png` | Hooks —— 跨配置层的条目及实际触发次数 |
 | `10-hooks-script.png` | Hooks —— hook 脚本查看器 / 编辑器 |
 | `11-mcp.png` | MCP —— 服务器、探测状态、工具与 schema token 成本 |
 | `12-permissions.png` | Permissions —— allow/deny/ask 规则及层级覆盖 |
 | `13-memory.png` | Memory —— 按项目的记忆库 |
-| `14-workflow.png` | Workflow —— 检测到的链条及其依赖图 |
 | `15-configs.png` | Effective Configs —— 合并后的设置层 |
 | `16-settings.png` | Settings —— 阈值与价格 |
 | `17-dashboard-dark.png` | 深色主题下的 Dashboard |

@@ -18,11 +18,11 @@ stand-ins, so nothing here reveals real projects or conversations:
 | Hook script filenames | `format-on-save.ps1`, `notify-done.ps1`, … |
 | Memory topics and their content | `build-pipeline-notes`, filler body text |
 | Permission rule specifiers | `Bash(npm run build:*)`, `Read(src/**)`, … |
-| Workflow chain names | `research`, `release`, … |
+| Dependency chain names | `research`, `release`, … |
 | Leftover absolute paths, emails | `C:\dev\workspace\file.ext`, `dev@example.com` |
 
 Mapping is deterministic (the same real value always becomes the same stand-in),
-so cross-references — a skill named in a workflow graph, a project in both the
+so cross-references — a skill named in a dependency graph, a project in both the
 Runs table and a chart — stay consistent across pages.
 
 Token counts, costs, timestamps, model names and all structural metadata are real.
@@ -36,13 +36,12 @@ Token counts, costs, timestamps, model names and all structural metadata are rea
 | `05-run-detail-usage.png` | Run detail — cost breakdown (Usage view) |
 | `06-claudemd.png` | CLAUDE.md — instruction files, injection timeline, editor |
 | `07-commands.png` | Commands — slash commands across user / project / plugin sources |
-| `08-skills.png` | Skills — list + detail with trigger analysis and editor |
+| `08-skills.png` | Skills — list + detail with trigger analysis, related components and editor |
 | `09-hooks.png` | Hooks — entries across settings layers with recorded fire counts |
 | `10-hooks-script.png` | Hooks — hook script viewer / editor |
 | `11-mcp.png` | MCP — servers, probe status, tools and schema token cost |
 | `12-permissions.png` | Permissions — allow/deny/ask rules with layer overrides |
 | `13-memory.png` | Memory — per-project memory stores |
-| `14-workflow.png` | Workflow — detected chain and its dependency graph |
 | `15-configs.png` | Effective Configs — merged settings layers |
 | `16-settings.png` | Settings — thresholds and pricing |
 | `17-dashboard-dark.png` | Dashboard in the dark theme |
