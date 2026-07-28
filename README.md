@@ -5,6 +5,10 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-yellow)](https://buymeacoffee.com/starbringer)
 
+<p align="center">
+  <img src="assets/social-preview.png" alt="AI Insights — understand and improve how you use AI coding tools" width="840">
+</p>
+
 A local web app that turns raw AI coding-tool usage into a live dashboard — token
 counts, costs, session history, configuration health.
 

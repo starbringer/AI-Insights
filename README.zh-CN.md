@@ -5,6 +5,10 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-yellow)](https://buymeacoffee.com/starbringer)
 
+<p align="center">
+  <img src="assets/social-preview.png" alt="AI Insights —— 了解并改进你使用 AI 编程工具的方式" width="840">
+</p>
+
 一个本地 Web 应用，把 AI 编程工具的原始使用数据变成实时仪表盘 —— token 用量、成本、
 会话历史、配置健康度。
 
