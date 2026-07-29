@@ -6,6 +6,7 @@ import { DATA_DIR, STATIC_DIR } from "./src/paths";
 import { getDb } from "./src/db";
 import { PROVIDERS } from "./src/providers";
 import { startWatcher } from "./src/watcher";
+import { getRetentionDays, startRetentionSweeper } from "./src/retention";
 import { settingsRouter } from "./src/api/settingsEndpoints";
 import { transcriptRouter } from "./src/api/transcriptEndpoints";
 import { providersRouter } from "./src/api/providersEndpoint";
@@ -32,6 +33,11 @@ for (const provider of PROVIDERS) {
   provider.scanAll(db);
 }
 console.log("[startup] done scanning");
+
+// Trim the cache to the configured window, then keep trimming as the cutoff
+// moves past local midnight on a long-running server.
+console.log(`[startup] data retention: ${getRetentionDays()} days`);
+startRetentionSweeper(db);
 
 if (!STATIC_ONLY) startWatcher(db);
 

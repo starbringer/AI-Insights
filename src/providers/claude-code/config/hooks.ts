@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { CLAUDE_DIR, SETTINGS_PATH, CLAUDE_JSON_PATH } from "../../../paths";
 import type { HookActionInfo, HookEntryInfo, HooksReport, ConfigScope } from "../../../config/types";
+import { getRetentionDays, retentionCutoffIso } from "../../../retention";
 import { listConfigLayerDirs, pathKey, readJsonFile } from "./shared";
 
 interface RawMatcher {
@@ -65,36 +66,37 @@ function collectFromFile(path: string, level: ConfigScope, projectDir: string | 
         sourcePath: path,
         projectDir,
         matcherIndex: i,
-        fires30d: 0,
+        fires: 0,
       });
     });
   }
 }
 
 /**
- * Recorded fire counts (30d) per entry, from the transcript event stream.
- * Attribution rules:
+ * Recorded fire counts per entry, over the retention window, from the
+ * transcript event stream. Attribution rules:
  *   UserPromptSubmit → real prompts; SessionStart → agents started;
  *   Stop/SubagentStop → logged stop-hook fires; Pre/PostToolUse → tool calls
  *   matched against the entry's matcher; PreCompact → compactions.
  */
 function attachFireCounts(db: Database, entries: HookEntryInfo[]): void {
+  const cutoff = retentionCutoffIso();
   const count = (kind: string): number =>
-    db.query<{ n: number }, [string]>(
-      `SELECT COUNT(*) as n FROM events WHERE kind = ? AND ts >= date('now','-30 days')`
-    ).get(kind)?.n ?? 0;
+    db.query<{ n: number }, [string, string]>(
+      `SELECT COUNT(*) as n FROM events WHERE kind = ? AND ts >= ?`
+    ).get(kind, cutoff)?.n ?? 0;
 
   const prompts = count("prompt");
   const hookFires = count("hook");
   const compacts = count("compact");
-  const agents = db.query<{ n: number }, []>(
-    `SELECT COUNT(DISTINCT agent_id) as n FROM turns WHERE ts >= date('now','-30 days')`
-  ).get()?.n ?? 0;
+  const agents = db.query<{ n: number }, [string]>(
+    `SELECT COUNT(DISTINCT agent_id) as n FROM turns WHERE ts >= ?`
+  ).get(cutoff)?.n ?? 0;
 
-  const toolCounts = db.query<{ detail: string; n: number }, []>(
+  const toolCounts = db.query<{ detail: string; n: number }, [string]>(
     `SELECT detail, COUNT(*) as n FROM events
-     WHERE kind='tool' AND ts >= date('now','-30 days') GROUP BY detail`
-  ).all();
+     WHERE kind='tool' AND ts >= ? GROUP BY detail`
+  ).all(cutoff);
   const totalTools = toolCounts.reduce((s, r) => s + r.n, 0);
 
   const toolFiresFor = (matcher?: string): number => {
@@ -106,11 +108,11 @@ function attachFireCounts(db: Database, entries: HookEntryInfo[]): void {
   };
 
   for (const e of entries) {
-    if (e.event === "UserPromptSubmit") e.fires30d = prompts;
-    else if (e.event === "SessionStart") e.fires30d = agents;
-    else if (e.event === "Stop" || e.event === "SubagentStop") e.fires30d = hookFires;
-    else if (e.event === "PreToolUse" || e.event === "PostToolUse") e.fires30d = toolFiresFor(e.matcher);
-    else if (e.event === "PreCompact") e.fires30d = compacts;
+    if (e.event === "UserPromptSubmit") e.fires = prompts;
+    else if (e.event === "SessionStart") e.fires = agents;
+    else if (e.event === "Stop" || e.event === "SubagentStop") e.fires = hookFires;
+    else if (e.event === "PreToolUse" || e.event === "PostToolUse") e.fires = toolFiresFor(e.matcher);
+    else if (e.event === "PreCompact") e.fires = compacts;
   }
 }
 
@@ -124,7 +126,11 @@ export function listHooks(db: Database): HooksReport {
     collectFromFile(join(dir, ".claude", "settings.local.json"), "local", dir, entries);
   }
   attachFireCounts(db, entries);
-  return { entries, totalFires30d: entries.reduce((s, e) => s + e.fires30d, 0) };
+  return {
+    entries,
+    totalFires: entries.reduce((s, e) => s + e.fires, 0),
+    windowDays: getRetentionDays(),
+  };
 }
 
 /** Script reads/writes only touch paths listHooks itself detected. */

@@ -23,6 +23,19 @@ function pq(prefix = '?') {
   return currentProviderId ? `${prefix}provider=${encodeURIComponent(currentProviderId)}` : '';
 }
 
+// Every recorded count on these tabs — skill calls, hook fires, injected
+// tokens — is bounded by the retention window, never a fixed 30 days. Reports
+// that carry their own windowDays win; the rest fall back to the app-wide
+// setting app.js loaded at startup.
+function retentionDays() {
+  return window.AppSettings?.retentionDays ?? 30;
+}
+
+/** Short label for a window, e.g. "14d". */
+function windowLabel(days) {
+  return `${days ?? retentionDays()}d`;
+}
+
 const SCOPE_COLORS = {
   user: '#4d8af0', project: '#9a4df0', local: '#f09a4d', plugin: '#5fb98f',
   global: '#4d8af0', 'claude.ai': '#4df09a', managed: '#df7b6b',
@@ -122,8 +135,8 @@ async function loadClaudeMdTab() {
         <span class="text-dim" style="font-size:12px">
           ${existing.length} file${existing.length !== 1 ? 's' : ''} ·
           ${fmt.tokens(totalTokens)} tokens total ·
-          ${report.injection.agentCount30d} agents (30d) ·
-          est. ${fmt.tokens(report.injection.estimatedInjectedTokens30d)} injected / 30d
+          ${report.injection.agentCount} agents (${windowLabel(report.injection.windowDays)}) ·
+          est. ${fmt.tokens(report.injection.estimatedInjectedTokens)} injected / ${windowLabel(report.injection.windowDays)}
         </span>
       </div>
       <div id="chart-cfg-injection" style="height:170px"></div>
@@ -146,7 +159,7 @@ async function loadClaudeMdTab() {
   const chart = initChart('chart-cfg-injection');
   if (chart) {
     const s = report.injection.dailySeries;
-    if (!s.length) renderChartEmpty(chart, 'No activity in the last 30 days');
+    if (!s.length) renderChartEmpty(chart, `No activity in the last ${retentionDays()} days`);
     else chart.setOption({ ...baseOption(),
       grid: { left: 8, right: 14, top: 14, bottom: 8, containLabel: true },
       xAxis: { type: 'category', data: s.map(x => x.date), axisLabel: { color: COLOR.dim } },
@@ -421,7 +434,7 @@ function renderSkillDetail(idx) {
       <div class="cfg-card-desc text-dim">${esc(s.description || '—')}</div>
       <div class="cfg-card-meta text-dim">
         ${fmt.tokens(s.tokens)} tok/invocation
-        ${s.calls30d ? ` · ${s.calls30d} call${s.calls30d !== 1 ? 's' : ''} (30d) · ~${fmt.tokens(s.estTokens30d)} injected` : ' · unused in 30d'}
+        ${s.calls ? ` · ${s.calls} call${s.calls !== 1 ? 's' : ''} (${windowLabel()}) · ~${fmt.tokens(s.estTokens)} injected` : ` · unused in ${windowLabel()}`}
       </div>
       ${trigHtml ? `<div class="cfg-triggers"><div class="cfg-section-label text-dim">Likely triggers — prompts containing these activate the skill</div>${trigHtml}</div>` : ''}
       ${s.scripts.length ? `<div class="cfg-section-label text-dim">Scripts</div>
@@ -445,7 +458,7 @@ function renderSkillDetail(idx) {
 
 // ===== Hooks =====
 
-const hookState = { entries: [], totalFires30d: 0, selected: -1, editable: false };
+const hookState = { entries: [], totalFires: 0, windowDays: null, selected: -1, editable: false };
 
 async function loadHooksTab() {
   const root = document.getElementById('cfg-hooks-root');
@@ -455,7 +468,8 @@ async function loadHooksTab() {
   catch (e) { return cfgError('cfg-hooks-root', e); }
 
   hookState.entries = report.entries;
-  hookState.totalFires30d = report.totalFires30d;
+  hookState.totalFires = report.totalFires;
+  hookState.windowDays = report.windowDays;
   hookState.selected = -1;
   hookState.editable = Boolean(configCaps.hooks?.editable);
 
@@ -467,8 +481,8 @@ async function loadHooksTab() {
   root.innerHTML = `
     <p class="text-dim" style="margin:0 0 12px">
       ${report.entries.length} hook entr${report.entries.length !== 1 ? 'ies' : 'y'} ·
-      ${report.totalFires30d} recorded fires in 30 days
-      <span class="title-note" title="Fire counts come from your transcripts: prompts for UserPromptSubmit, agent starts for SessionStart, logged stop-hook fires, tool calls matched against each entry's matcher for Pre/PostToolUse, compactions for PreCompact">recorded, not estimated</span>
+      ${report.totalFires} recorded fires in ${report.windowDays ?? retentionDays()} days
+      <span class="title-note" title="Fire counts come from your transcripts: prompts for UserPromptSubmit, agent starts for SessionStart, logged stop-hook fires, tool calls matched against each entry's matcher for Pre/PostToolUse, compactions for PreCompact. They span the retention window, so they only go as far back as the records this app keeps.">recorded, not estimated</span>
     </p>
     <div class="cfg-split cfg-split-narrow">
       <aside class="cfg-list" id="hook-list"></aside>
@@ -485,7 +499,7 @@ function renderHookList() {
       <div class="cfg-list-meta">
         ${scopeBadge(h.level, h.projectDir ?? '')}
         ${h.matcher ? `<code class="text-dim" title="Only tool calls matching this pattern fire the hook">${esc(h.matcher)}</code>` : ''}
-        <span class="text-dim" title="Recorded fires in the last 30 days">${h.fires30d}×</span>
+        <span class="text-dim" title="Recorded fires over the retention window">${h.fires}×</span>
       </div>
     </div>`).join('');
   el.querySelectorAll('.cfg-list-item').forEach(item => {
@@ -515,7 +529,7 @@ function renderHookDetail(idx) {
       <div class="cfg-card-meta text-dim">
         Event <code>${esc(h.event)}</code>
         ${h.matcher ? ` · matcher <code>${esc(h.matcher)}</code>` : ' · fires on every occurrence'}
-        · ${h.fires30d} recorded fires (30d)
+        · ${h.fires} recorded fires (${windowLabel(hookState.windowDays)})
       </div>
       <div class="cfg-section-label text-dim">Actions — click one with a script to view/edit it</div>
       <div id="hook-actions">${h.actions.map((a, ai) => `
@@ -583,12 +597,12 @@ async function loadMcpTab(refresh = false) {
   mcpState.report = d;
   mcpState.selected = -1;
 
-  const est30d = d.servers.reduce((s, x) => s + (x.schemaTokens || 0), 0) * (d.agents30d ?? 0);
+  const estWindow = d.servers.reduce((s, x) => s + (x.schemaTokens || 0), 0) * (d.agents ?? 0);
   const kpis = [
     { label: 'Servers', value: String(d.servers.length), hint: 'from config files, all scopes' },
     { label: 'Tools', value: String(d.totalTools), hint: 'across all probed servers' },
     { label: 'Schema tokens', value: fmt.tokens(d.totalSchemaTokens), hint: 'injected into every session that loads these servers' },
-    { label: 'Est. injected / 30d', value: fmt.tokens(est30d), hint: `schema tokens × ${d.agents30d ?? 0} agents (upper bound)` },
+    { label: `Est. injected / ${windowLabel(d.windowDays)}`, value: fmt.tokens(estWindow), hint: `schema tokens × ${d.agents ?? 0} agents (upper bound)` },
   ];
 
   root.innerHTML = `
@@ -655,7 +669,7 @@ function renderMcpDetail(idx) {
   const d = mcpState.report;
   const s = d.servers[idx];
   if (!s) return;
-  const est30d = (s.schemaTokens || 0) * (d.agents30d ?? 0);
+  const estWindow = (s.schemaTokens || 0) * (d.agents ?? 0);
   const el = document.getElementById('mcp-detail');
   el.innerHTML = `
     <div class="cfg-editor-card">
@@ -670,7 +684,7 @@ function renderMcpDetail(idx) {
         ${s.command ? `<code title="${esc(s.command)}">${esc(s.command.slice(0, 110))}</code><br>` : ''}
         defined in <code title="${esc(s.source)}">${esc(s.source.split(/[\\/]/).slice(-2).join('/'))}</code>
         ${s.toolCount ? ` · ${s.toolCount} tools · ${fmt.tokens(s.schemaTokens)} schema tokens
-          · <span title="Schema tokens × ${d.agents30d ?? 0} agents in the last 30 days — an upper bound of what this server's schemas injected">≈${fmt.tokens(est30d)} injected / 30d</span>` : ''}
+          · <span title="Schema tokens × ${d.agents ?? 0} agents over the retention window — an upper bound of what this server's schemas injected">≈${fmt.tokens(estWindow)} injected / ${windowLabel(d.windowDays)}</span>` : ''}
       </div>
       ${s.probeError ? `<div class="cfg-mcp-error text-dim" style="margin:6px 0 0">${esc(s.probeError)}</div>` : ''}
       <div id="mcp-related" class="cfg-related"></div>

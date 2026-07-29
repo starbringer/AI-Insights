@@ -27,10 +27,11 @@ Lead with these checks when the user names a problem.
 ## C1 — Instruction files are taxing every turn
 
 **Signal** `list_instruction_files` → per-file `tokens`, and
-`injection.estimatedInjectedTokens30d`.
+`injection.estimatedInjectedTokens` (spanning `injection.windowDays`).
 
 **Threshold** A single always-injected file over **2,000 tokens** (≈200 lines),
-or 30-day injected tokens above **2M**.
+or window-wide injected tokens above **2M** (scale the threshold if the window
+is not 30 days).
 
 **Why it costs** Instruction files load at the start of every session and sit in
 the prefix of every request in it. The cost is `tokens × requests`, not
@@ -52,7 +53,7 @@ Rule of thumb for each line: *would removing this cause a mistake?* If not, cut.
 Sections that describe a repeatable workflow become a skill — a skill's body is
 free until it is invoked.
 
-**Sizing** `(tokens_removed / tokens_now) × estimatedInjectedTokens30d`, priced
+**Sizing** `(tokens_removed / tokens_now) × estimatedInjectedTokens`, priced
 with `get_pricing` at the model from `get_model_usage`.
 
 ---
@@ -74,18 +75,18 @@ sets it. For sub-agents, set a cheap model in the agent definition — verbose
 read-heavy work is exactly what a small model should do.
 
 **Sizing** Take the `usd` field of the `switch-cheaper-model` advice for each of
-the top runs and scale by that run's share of 30-day tokens. Never state a
+the top runs and scale by that run's share of the window's tokens. Never state a
 percentage the tools did not produce.
 
 ---
 
 ## C3 — Prompt cache is not being hit
 
-**Signal** `get_usage_summary` → `cacheHitRate30dPct`; `get_run_usage` →
+**Signal** `get_usage_summary` → `cacheHitRatePct`; `get_run_usage` →
 `low-cache-hit` advice; `get_usage_timeseries` → bars where cache-write is high
 and cache-read is near zero.
 
-**Threshold** Under **50%** over 30 days is worth investigating; under **30%** on
+**Threshold** Under **50%** over the retention window is worth investigating; under **30%** on
 a specific run is a finding.
 
 **Why it costs** A cache read is roughly a tenth the price of processing the same
@@ -134,14 +135,14 @@ by the turns that followed it in that run, is the recoverable amount.
 
 ## C5 — Skills that don't pay for themselves
 
-**Signal** `list_skills` (`tokens`, `calls30d`, `estTokens30d`, `triggers`,
+**Signal** `list_skills` (`tokens`, `calls`, `estTokens`, `triggers`,
 `overriddenBy`) cross-referenced with `get_skill_usage`.
 
 **Thresholds**
-- `calls30d === 0` on a skill that has existed for a while → never triggers.
+- `calls === 0` on a skill that has existed for a while → never triggers.
 - `overriddenBy` set → a same-named skill at a higher-priority scope wins; this
   one is dead weight and a source of confusion.
-- Large `tokens` with low `calls30d` → the body is doing too much for how often
+- Large `tokens` with low `calls` → the body is doing too much for how often
   it is needed.
 
 **Why it costs** A skill's body enters context when invoked and stays there for
@@ -169,7 +170,7 @@ say so rather than inventing a number.
 `get_mcp_usage` (`calls`, `tokens` per server and per tool).
 
 **Thresholds**
-- A server with `schemaTokens` above ~2,000 and **zero** calls in 30 days.
+- A server with `schemaTokens` above ~2,000 and **zero** calls in the window.
 - A single tool responsible for most of a server's token volume.
 - Any `probeError` — a server that cannot be probed is usually broken for the
   tool too.
@@ -188,18 +189,18 @@ each server's calls injected.
   skill that specifies the arguments that return less.
 - Fix or remove servers with a `probeError`.
 
-**Sizing** Sum the 30-day `tokens` for the servers being removed, priced with
+**Sizing** Sum the window's `tokens` for the servers being removed, priced with
 `get_pricing`.
 
 ---
 
 ## C7 — Rules that should be hooks; hooks that are dead
 
-**Signal** `list_hooks` (`fires30d`, `matcher`, `event`, `scriptPath`),
+**Signal** `list_hooks` (`fires`, `matcher`, `event`, `scriptPath`),
 `read_hook_script`, plus instruction files read in C1.
 
 **Thresholds**
-- A hook with `fires30d === 0` → the matcher does not match anything, or the
+- A hook with `fires === 0` → the matcher does not match anything, or the
   hook is obsolete.
 - An instruction-file rule phrased as "always" / "never" / "every time" → it
   belongs in a hook, not in prose.
@@ -229,7 +230,7 @@ outlier calls the filter would have shrunk.
 **Signal** `list_runs` and `get_project_usage`: titles that repeat, several runs
 in one project with near-identical shape and similar token totals.
 
-**Threshold** The same task shape appearing **3+ times** in 30 days.
+**Threshold** The same task shape appearing **3+ times** inside the window.
 
 **Why it costs** Every repetition re-derives the same context: the same files
 read, the same conventions rediscovered, the same corrections given. That is

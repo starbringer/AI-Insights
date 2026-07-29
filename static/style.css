@@ -611,6 +611,15 @@ tbody tr:hover td { background: var(--accent-soft); }
 }
 .threshold-unit { font-size: 11px; color: var(--text-dim); width: 42px; }
 
+/* Retention: a single number + unit + save button on one line. */
+.retention-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 2px;
+}
+.retention-row .input-sm { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+
 /* =================================================================
    Skeleton loading
    ================================================================= */

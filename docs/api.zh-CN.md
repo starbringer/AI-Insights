@@ -29,13 +29,16 @@ UI 的所有操作都经由这些路由，因此它们同时也是可供脚本�
 
 ## 使用数据
 
-标注 *ranged* 的路由接受 `?range=1h\|24h\|7d\|30d`。分桶粒度自适应：`1h` 用 5 分钟切片，
-`24h` 用小时，其余按天。
+标注 *ranged* 的路由接受 `?range=`，取值为 `1h`、`24h` 或 N 天（`7d`、`14d`、`30d` 等）。
+分桶粒度自适应：`1h` 用 5 分钟切片，`24h` 与不超过 3 天的天数范围用小时，其余按天。
+
+range 的默认值就是[数据保留窗口](#设置)，并被它截断：更早的记录已被删除，因此在 30 天
+保留设置下请求 `?range=90d` 只会按 `30d` 作答，而不会假装能看得更远。
 
 | 路由 | 说明 |
 |---|---|
-| `GET /api/stats` | KPI 总量：今日、7 天、30 天、缓存命中率、活跃运行数 |
-| `GET /api/timeseries` | *ranged* —— token 趋势（输入 / 输出 / 缓存写入 / 缓存读取） |
+| `GET /api/stats` | KPI 总量：`retentionDays`、`today`、`sevenDays`（窗口 ≤ 7 天时为 `null`）、`window`（整个保留窗口的总量）、`cacheHitRatePct`、`activeRuns` |
+| `GET /api/timeseries` | *ranged* —— token 趋势（输入 / 输出 / 缓存写入 / 缓存读取）。不带 `?range=` 时，`?days=N` 返回按天分桶的数据，上限为保留窗口 |
 | `GET /api/models` | *ranged* —— 按模型的总量 |
 | `GET /api/projects` | *ranged* —— 按项目工作目录的总量，含运行数与智能体数 |
 | `GET /api/runs` | 分页的运行列表；`?limit=`、`?offset=`、`?search=`、`?project=` |
@@ -55,21 +58,21 @@ UI 的所有操作都经由这些路由，因此它们同时也是可供脚本�
 |---|---|
 | `GET /api/config/capabilities` | 当前适配器支持哪些能力 —— 决定显示哪些标签页 |
 | `GET /api/config/projects` | 从转录记录中发现的项目目录（供作用域选择器使用） |
-| `GET /api/config/instructions` | 指令文件 + 注入 token 序列 |
+| `GET /api/config/instructions` | 指令文件 + 注入 token 序列。`injection` 带有保留窗口内的 `windowDays`、`agentCount` 与 `estimatedInjectedTokens` |
 | `GET /api/config/instructions/file?path=` | 原始文件内容 |
 | `PUT /api/config/instructions/file` | 写入一个已枚举的指令文件 |
 | `GET /api/config/commands` | 所有来源的斜杠命令，带覆盖标记 |
 | `PUT /api/config/commands/file` | 写入一个可编辑的命令文件 |
 | `POST /api/config/commands` | 创建命令 |
 | `DELETE /api/config/commands` | 删除一个可编辑的命令 |
-| `GET /api/config/skills` | skill 列表，含触发词、token 成本与实际使用记录 |
+| `GET /api/config/skills` | skill 列表，含触发词、token 成本与保留窗口内的实际使用记录（`calls` / `estTokens`） |
 | `PUT /api/config/skills/file` | 写入一个可编辑的 SKILL.md |
-| `GET /api/config/hooks` | 跨配置层的 hook 条目 + 实际触发次数 |
+| `GET /api/config/hooks` | 跨配置层的 hook 条目 + 实际触发次数（`entries[].fires`、`totalFires`、`windowDays`） |
 | `GET /api/config/hooks/script?path=` | 读取某个 hook 的脚本文件 |
 | `PUT /api/config/hooks/script` | 写入某个 hook 的脚本文件 |
 | `DELETE /api/config/hooks` | 从设置文件中移除一个 hook 条目 |
 | `GET /api/config/permissions` | 合并后的 allow/deny/ask 规则；`?project=` 可加入项目层 |
-| `GET /api/config/mcp` | MCP 服务器、探测状态、工具、schema、诊断 |
+| `GET /api/config/mcp` | MCP 服务器、探测状态、工具、schema、诊断，以及用于注入量估算的 `agents` / `windowDays` |
 | `GET /api/config/memory` | 按项目的记忆库 |
 | `GET /api/config/effective` | 合并后的设置层；`?project=` 选择项目层。Claude Code 会累加而非覆盖的键（`permissions.allow` / `deny` / `ask`）返回各层规则的拼接结果，并带 `mergedLevels` 而非 `overriddenLevels` |
 | `GET /api/config/dependencies` | 依赖图：节点、边、依赖链、统计。为 Skills 与 MCP 标签页的「关联组件」提供数据 |
@@ -82,6 +85,7 @@ UI 的所有操作都经由这些路由，因此它们同时也是可供脚本�
 | 路由 | 说明 |
 |---|---|
 | `GET /api/settings/thresholds` · `PUT /api/settings/thresholds` | Harness 标签页上 ok/warn/error 状态标记所用的告警/错误阈值。`PUT` 只合并你传入的键，并写入 `data/thresholds.json` |
+| `GET /api/settings/retention` · `PUT /api/settings/retention` | 保留多少天的记录。`GET` 返回 `{ retentionDays, defaultDays, minDays, maxDays }`；`PUT { retentionDays }` 会截断到 1–365，写入 `data/retention.json`，并返回 `{ retentionDays, previousDays, rescanned, pruned }`。调小会立即清理超出部分；调大会清空解析偏移并重新扫描全部转录文件，因此响应可能需要几秒 |
 | `GET /api/settings/pricing` | 驱动应用内全部成本数字的分模型参考价格。HTTP 接口只读 —— 如需修改请编辑 `data/pricing.json` |
 
 ## MCP

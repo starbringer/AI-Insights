@@ -5,7 +5,9 @@ import {
   getTotals, getDailySeries, getAgents, getProjects,
   getModelStats, getCacheHitRate, getTopTurns, localMidnightIso,
   parseRange, rangeSinceIso, getRangeSeries, getMcpUsage, getSkillUsage,
+  type RangeKey,
 } from "../transcripts/aggregate";
+import { clampDays, clampRange, getRetentionDays, retentionRange } from "../retention";
 import { listRuns, loadRun, getTopRuns, getActiveRuns } from "../transcripts/runs";
 import { getRunUsage } from "../transcripts/usageReport";
 import { PROVIDERS } from "../providers";
@@ -24,19 +26,30 @@ function providerOr400(c: Context): { filter: string | null } | Response {
   return { filter: res.filter };
 }
 
+/**
+ * The range for a ranged route: whatever was asked for, narrowed to the
+ * retention window (nothing older than that exists), defaulting to the full
+ * window when the query string omits it.
+ */
+function rangeOf(c: Context): RangeKey {
+  return clampRange(parseRange(c.req.query("range")) ?? retentionRange());
+}
+
 transcriptRouter.get("/stats", c => {
   const p = providerOr400(c);
   if (p instanceof Response) return p;
   const db = getDb();
-  const today = localMidnightIso(0);
-  const ago7  = localMidnightIso(7);
-  const ago30 = localMidnightIso(30);
+  const retentionDays = getRetentionDays();
+  const windowSince = rangeSinceIso(retentionRange());
 
   return c.json({
-    today:    getTotals(db, today, p.filter),
-    sevenDays: getTotals(db, ago7, p.filter),
-    thirtyDays: getTotals(db, ago30, p.filter),
-    cacheHitRate30d: getCacheHitRate(db, ago30, p.filter),
+    retentionDays,
+    today: getTotals(db, localMidnightIso(0), p.filter),
+    // Only meaningful while the window is wider than a week; below that it
+    // would be the retention total wearing a "7 days" label.
+    sevenDays: retentionDays > 7 ? getTotals(db, localMidnightIso(7), p.filter) : null,
+    window: getTotals(db, windowSince, p.filter),
+    cacheHitRatePct: getCacheHitRate(db, windowSince, p.filter),
     activeRuns: getActiveRuns(db, undefined, p.filter),
   });
 });
@@ -46,8 +59,8 @@ transcriptRouter.get("/timeseries", c => {
   if (p instanceof Response) return p;
   const db = getDb();
   const range = parseRange(c.req.query("range"));
-  if (range) return c.json(getRangeSeries(db, range, p.filter));
-  const days = parseInt(c.req.query("days") ?? "30", 10);
+  if (range) return c.json(getRangeSeries(db, clampRange(range), p.filter));
+  const days = clampDays(parseInt(c.req.query("days") ?? String(getRetentionDays()), 10) || getRetentionDays());
   return c.json(getDailySeries(db, days, p.filter));
 });
 
@@ -106,16 +119,17 @@ transcriptRouter.get("/projects", c => {
   const p = providerOr400(c);
   if (p instanceof Response) return p;
   const db = getDb();
-  const range = parseRange(c.req.query("range"));
-  return c.json(getProjects(db, range ? rangeSinceIso(range) : undefined, p.filter));
+  return c.json(getProjects(db, rangeSinceIso(rangeOf(c)), p.filter));
 });
 
 transcriptRouter.get("/models", c => {
   const p = providerOr400(c);
   if (p instanceof Response) return p;
   const db = getDb();
+  // `?since=` stays the fallback when no usable range was given, so this route
+  // keeps its documented raw-timestamp form.
   const range = parseRange(c.req.query("range"));
-  const since = range ? rangeSinceIso(range) : c.req.query("since");
+  const since = range ? rangeSinceIso(clampRange(range)) : c.req.query("since");
   return c.json(getModelStats(db, since, p.filter));
 });
 
@@ -132,24 +146,21 @@ transcriptRouter.get("/top-runs", c => {
   if (p instanceof Response) return p;
   const db = getDb();
   const limit = parseInt(c.req.query("limit") ?? "10", 10);
-  const range = parseRange(c.req.query("range"));
-  return c.json(getTopRuns(db, limit, range ? rangeSinceIso(range) : undefined, p.filter));
+  return c.json(getTopRuns(db, limit, rangeSinceIso(rangeOf(c)), p.filter));
 });
 
 transcriptRouter.get("/mcp-usage", c => {
   const p = providerOr400(c);
   if (p instanceof Response) return p;
   const db = getDb();
-  const range = parseRange(c.req.query("range")) ?? "30d";
-  return c.json(getMcpUsage(db, rangeSinceIso(range), p.filter));
+  return c.json(getMcpUsage(db, rangeSinceIso(rangeOf(c)), p.filter));
 });
 
 transcriptRouter.get("/skill-usage", c => {
   const p = providerOr400(c);
   if (p instanceof Response) return p;
   const db = getDb();
-  const range = parseRange(c.req.query("range")) ?? "30d";
-  return c.json(getSkillUsage(db, rangeSinceIso(range), p.filter));
+  return c.json(getSkillUsage(db, rangeSinceIso(rangeOf(c)), p.filter));
 });
 
 transcriptRouter.get("/agent/:agentId/tree", c => {

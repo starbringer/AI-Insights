@@ -4,6 +4,7 @@ import type { Database } from "bun:sqlite";
 import { countTokens } from "../../../tokenizer";
 import { SKILLS_DIR } from "../../../paths";
 import type { SkillDetail, SkillTrigger } from "../../../config/types";
+import { retentionCutoffIso } from "../../../retention";
 import { listConfigLayerDirs, parseFrontmatter, enabledPluginDirs, markOverrides, pathKey } from "./shared";
 
 const ACTION_WORDS = ["create", "generate", "build", "analyze", "convert", "transform", "export",
@@ -74,22 +75,22 @@ function scanSkillRoot(root: string, opts: ScanOpts, usage: Map<string, { calls:
       references: listDirFiles(join(root, ent.name, "references")),
       scripts: listDirFiles(join(root, ent.name, "scripts")),
       triggers: analyzeTriggers(name, description, content),
-      calls30d: use?.calls ?? 0,
-      estTokens30d: use?.tokens ?? 0,
+      calls: use?.calls ?? 0,
+      estTokens: use?.tokens ?? 0,
       editable: opts.source !== "plugin",
     });
   }
 }
 
 export function listSkills(db: Database): SkillDetail[] {
-  // Recorded Skill invocations (last 30 days) from the event stream.
+  // Recorded Skill invocations over the retention window, from the event stream.
   const usage = new Map<string, { calls: number; tokens: number }>();
-  const rows = db.query<{ skill: string; calls: number; tokens: number }, []>(
+  const rows = db.query<{ skill: string; calls: number; tokens: number }, [string]>(
     `SELECT extra as skill, COUNT(*) as calls, COALESCE(SUM(tokens),0) as tokens
      FROM events WHERE kind='tool' AND detail='Skill' AND extra IS NOT NULL
-       AND ts >= date('now','-30 days')
+       AND ts >= ?
      GROUP BY extra`
-  ).all();
+  ).all(retentionCutoffIso());
   for (const r of rows) usage.set(r.skill, { calls: r.calls, tokens: r.tokens });
 
   const out: SkillDetail[] = [];
@@ -104,7 +105,7 @@ export function listSkills(db: Database): SkillDetail[] {
     }, usage, out);
   }
   markOverrides(out);
-  return out.sort((a, b) => b.calls30d - a.calls30d || a.name.localeCompare(b.name));
+  return out.sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name));
 }
 
 export function writeSkillFile(db: Database, path: string, content: string): void {

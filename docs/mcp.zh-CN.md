@@ -101,16 +101,22 @@ bun run mcp        # = bun run mcp-stdio.ts
 
 每个工具都接受一个可选的 **`provider`** 参数来指定数据源。默认为 `claude-code`；传
 `all` 可跨所有已注册数据源汇总。未知 id 会返回一条列出合法取值的错误。答案不随数据源
-变化的三个工具（`list_providers`、`get_pricing`、`get_thresholds`）不带该参数。
+变化的应用级工具（`list_providers`、`get_pricing`、`get_thresholds`、
+`get_data_retention`）不带该参数。
+
+所有带范围的工具都接受 **`range`**：`1h`、`24h` 或 N 天（`7d`、`30d` 等）。它默认取
+[数据保留窗口](../README.zh-CN.md#数据保留)，并被其截断 —— 应用会删除更早的记录（默认
+保留 30 天），因此任何工具都无法看得更远。`get_usage_summary` 会以 `retentionDays` 返回
+该窗口，`get_data_retention` 则单独返回它。
 
 ### 用量
 
 | 工具 | 返回 |
 |---|---|
 | `list_providers` | 已注册数据源及实时 `hasData` 标志 |
-| `get_usage_summary` | 今日 / 7 天 / 30 天总量与成本、缓存命中率、活跃运行数 |
+| `get_usage_summary` | `retentionDays`、今日 / 7 天（窗口 ≤ 7 天时为 `null`）/ 整个窗口的总量与成本、缓存命中率、活跃运行数 |
 | `get_usage_timeseries` | 某时间范围内的 token 趋势，分桶粒度自适应 |
-| `get_daily_usage` | 最长 365 天的逐日总量 |
+| `get_daily_usage` | 逐日总量，默认取保留窗口并以其为上限 |
 | `get_model_usage` | 按模型的总量 |
 | `get_project_usage` | 按项目目录的总量、运行数与智能体数 |
 | `list_runs` | 分页会话列表（`limit`、`offset`、`project`、`search`） |
@@ -127,11 +133,11 @@ bun run mcp        # = bun run mcp-stdio.ts
 | 工具 | 返回 |
 |---|---|
 | `get_harness_capabilities` | 当前 provider 的适配器支持哪些配置能力 |
-| `list_instruction_files` | 指令文件及其 token 数与 30 天注入序列 |
+| `list_instruction_files` | 指令文件及其 token 数与保留窗口内的注入序列 |
 | `read_instruction_file` | 某个已枚举指令文件的完整内容 |
 | `list_commands` | 所有来源的斜杠命令，带覆盖标记 |
-| `list_skills` | 技能及其触发词、token 成本与 30 天**实际**使用记录 |
-| `list_hooks` | 跨配置层的 hook 条目及**实际**触发次数 |
+| `list_skills` | 技能及其触发词、token 成本与保留窗口内的**实际**使用记录（`calls` / `estTokens`） |
+| `list_hooks` | 跨配置层的 hook 条目及保留窗口内的**实际**触发次数（`fires`、`windowDays`） |
 | `read_hook_script` | 某个 hook 脚本文件的源码 |
 | `get_permissions` | 合并后的 allow / deny / ask 规则，并标出被遮蔽的规则 |
 | `list_mcp_servers` | 已配置的 MCP 服务器、探测状态、工具、schema token 成本 |
@@ -146,6 +152,7 @@ bun run mcp        # = bun run mcp-stdio.ts
 |---|---|
 | `get_pricing` | 驱动全部成本数字的分模型参考价格表 |
 | `get_thresholds` | 已配置的告警/错误阈值 |
+| `get_data_retention` | 本机保留多少天的记录 —— 所有时间范围与实际计数的硬上限 |
 
 ### 载荷克制
 
@@ -217,14 +224,14 @@ diff 呈现，也可以被拒绝。这正是重点：复盘负责建议，人负
 
 | # | 检查 | 触发条件 |
 |---|---|---|
-| C1 | 指令文件对每个回合征税 | 单文件超过约 2,000 token，或 30 天注入超过 200 万 token |
+| C1 | 指令文件对每个回合征税 | 单文件超过约 2,000 token，或窗口内注入超过 200 万 token |
 | C2 | 高价模型在做常规工作 | 高价档占 token 超过 50% |
-| C3 | 提示缓存没命中 | 30 天低于 50%；单次运行低于 30% |
+| C3 | 提示缓存没命中 | 整个窗口低于 50%；单次运行低于 30% |
 | C4 | 会话携带过多上下文 | 单次调用超过 20 万 token，或单次运行占该周期 20% 以上 |
-| C5 | 不划算的技能 | 30 天零调用、被同名高优先级定义遮蔽，或正文很大而使用很少 |
+| C5 | 不划算的技能 | 窗口内零调用、被同名高优先级定义遮蔽，或正文很大而使用很少 |
 | C6 | MCP 服务器入不敷出 | schema 超过 2,000 token 且零调用；探测报错 |
 | C7 | 该做成 hook 的规则；已死的 hook | 散文里的“总是/绝不”规则；零触发的 hook |
-| C8 | 应该沉淀为技能的重复劳动 | 同一形态任务 30 天内出现 3 次以上 |
+| C8 | 应该沉淀为技能的重复劳动 | 同一形态任务在窗口内出现 3 次以上 |
 | C9 | 子智能体开销过重的运行 | 子智能体占单次运行 token 超过 60% |
 | C10 | 权限白名单过窄 | 日常高频命令不在 `allow` 中 |
 | C11 | 形同虚设的设置 | 键落在不被读取的层、被遮蔽的命令/技能、孤儿记忆文件 |

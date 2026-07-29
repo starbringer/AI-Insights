@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { ToolConfigAdapter } from "../../../config/types";
+import { getRetentionDays, retentionCutoffIso } from "../../../retention";
 import { getInstructionsReport, readInstructionFile, writeInstructionFile } from "./instructions";
 import { listCommands, writeCommandFile, createCommand, deleteCommand } from "./commands";
 import { listSkills, writeSkillFile } from "./skills";
@@ -54,10 +55,10 @@ export const claudeCodeConfigAdapter: ToolConfigAdapter = {
 
   mcpReport: async (db: Database, forceRefresh = false) => {
     const report = await getMcpReport(forceRefresh);
-    const agents30d = db.query<{ n: number }, []>(
-      `SELECT COUNT(DISTINCT agent_id) as n FROM turns WHERE ts >= date('now','-30 days')`
-    ).get()?.n ?? 0;
-    return { ...report, agents30d };
+    const agents = db.query<{ n: number }, [string]>(
+      `SELECT COUNT(DISTINCT agent_id) as n FROM turns WHERE ts >= ?`
+    ).get(retentionCutoffIso())?.n ?? 0;
+    return { ...report, agents, windowDays: getRetentionDays() };
   },
 
   listMemoryStores,

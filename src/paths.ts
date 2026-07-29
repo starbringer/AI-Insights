@@ -104,6 +104,7 @@ export const APP_DIR = existsSync(SRC_DIR) ? join(SRC_DIR, "..") : dirname(proce
 export const DATA_DIR = join(APP_DIR, "data");
 export const DB_PATH = join(DATA_DIR, "cache.db");
 export const THRESHOLDS_PATH = join(DATA_DIR, "thresholds.json");
+export const RETENTION_PATH = join(DATA_DIR, "retention.json");
 export const PRICING_PATH = join(DATA_DIR, "pricing.json");
 export const STATIC_DIR = join(APP_DIR, "static");
 /**

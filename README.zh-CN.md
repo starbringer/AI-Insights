@@ -97,6 +97,14 @@ bun run server.ts --port=8080 --no-browser
 数据库只是缓存 —— JSONL 转录文件才是唯一的事实来源。删除 `data/cache.db` 后重启即可
 强制全量重新解析。版本更新导致 schema 版本变化时，应用会自动做同样的重建。
 
+### 数据保留
+
+缓存只保留一个滚动时间窗 —— **默认 30 天**，可在 **Settings（设置）→ 数据保留** 中改为
+1–365 天（`data/retention.json`）。更早的记录会在启动时及之后每小时删除。
+
+窗口决定一切上限：图表范围、各类实际计数、MCP 工具的 range。调小会立即删除超出部分；
+调大则重新扫描转录文件，尽量恢复其中仍存在的历史。
+
 ### 独立可执行文件
 
 ```bash
@@ -145,13 +153,14 @@ bun run build   # → dist/ai-insights（Windows 为 .exe），约 60MB，无需
 
 ### Dashboard（仪表盘）
 
-- **五张 KPI 卡片** —— 今日 / 7 天 / 30 天总量，含 API 等价成本、缓存命中率、活跃运行数
+- **KPI 卡片** —— 今日 / 7 天 / 保留窗口总量，含 API 等价成本、缓存命中率、活跃运行数
 - **token 趋势图** —— 按输入、输出、缓存写入、缓存读取拆分
 - **再往下** —— 按模型的用量、Top 项目、**MCP token 用量**（按服务器，带按工具的 tooltip）、**skill token 用量**、带 50% 参考线的**缓存命中率**、**模型占比**、**Top 10 运行**（点击柱状条直接跳进该运行）
 
 ![Dashboard charts](docs/screenshots/02-dashboard-charts.png)
 
-每个图表都有独立的时间范围切换（`1h` / `24h` / `7d` / `30d`），并记住你的选择。成本是
+每个图表都有独立的时间范围切换（`1h` / `24h` / `7d` / `30d`），并记住你的选择。梯度跟随
+[保留窗口](#数据保留) —— 14 天窗口给出 `1h` / `24h` / `7d` / `14d`。成本是
 基于可编辑价格表算出的 API 等价参考值，不是账单；[详见此处](docs/data-model.zh-CN.md#成本估算)。
 
 ### Runs（运行列表）
@@ -220,8 +229,8 @@ token 与词数统计、带 **Save** 的内嵌编辑器，以及按天的注入 
 
 #### Skills（技能）
 
-覆盖检测、SKILL.md 的 token 成本、`references/` 与 `scripts/` 清单、30 天内**实际记录**
-的调用次数与注入 token，以及展示哪些提示词关键词会触发该 skill 的**触发分析器**。
+覆盖检测、SKILL.md 的 token 成本、`references/` 与 `scripts/` 清单、保留窗口内**实际
+记录**的调用次数与注入 token，以及展示哪些提示词关键词会触发该 skill 的**触发分析器**。
 
 最后是**关联组件**：与该 skill 相连的 hook、MCP 服务器和命令，以图 + 列表两种形式呈现
 —— 按组件类型分列，箭头由「引用方」指向「被引用方」，实线表示内容中确有引用，虚线表示
@@ -231,7 +240,7 @@ token 与词数统计、带 **Save** 的内嵌编辑器，以及按天的注入 
 
 #### Hooks
 
-列出所有配置层中的每个 hook，含 matcher、动作类型，以及最近 30 天的**实际触发次数**
+列出所有配置层中的每个 hook，含 matcher、动作类型，以及保留窗口内的**实际触发次数**
 —— 来自事件流记录，不是估算。
 
 ![Hooks](docs/screenshots/09-hooks.png)
@@ -244,7 +253,7 @@ token 与词数统计、带 **Save** 的内嵌编辑器，以及按天的注入 
 #### MCP
 
 左侧是服务器列表，含作用域、传输方式和工具数量；右侧是启动命令、来源文件、探测状态、
-30 天注入量估算，以及可展开的工具列表（含描述与 JSON schema）。诊断信息在默认面板中，
+按窗口计算的注入量估算，以及可展开的工具列表（含描述与 JSON schema）。诊断信息在默认面板中，
 重新探测按钮可绕过 10 分钟缓存。
 
 ![MCP](docs/screenshots/11-mcp.png)
@@ -278,8 +287,8 @@ skill 一致的**关联组件**区域 —— 不含任何 skill 的集群（hook
 
 ### Settings（设置）
 
-Harness 标签页上 ok/warn/error 状态标记所用的告警阈值，以及驱动应用内全部成本数字的分
-模型参考价格。
+Harness 标签页上 ok/warn/error 状态标记所用的告警阈值、[数据保留](#数据保留)，以及驱动
+应用内全部成本数字的分模型参考价格。
 
 ![Settings](docs/screenshots/16-settings.png)
 
@@ -317,6 +326,7 @@ src/
   tokenizer.ts             js-tiktoken 封装
   pricing.ts               分模型价格表 + computeCost()
   thresholds.ts            可配置的告警阈值
+  retention.ts             数据保留窗口：设置、截止时间、清理、每小时扫描
   providers/
     types.ts               Provider 接口 + NormalizedTurn 结构
     index.ts               Provider 注册表，providerForPath / providerById 查找
@@ -353,7 +363,7 @@ src/
     protocol.ts            与传输无关的 JSON-RPC / MCP 分发
   api/
     providerParam.ts       共享的 ?provider= 解析（HTTP + MCP）
-    settingsEndpoints.ts   阈值（读写）+ 价格（只读）
+    settingsEndpoints.ts   阈值 + 数据保留（读写）+ 价格（只读）
     transcriptEndpoints.ts 用量数据：统计、时间序列、运行、智能体、树、用量报告
     configEndpoints.ts     /api/config/* —— Harness 标签页
     providersEndpoint.ts   GET /api/providers
