@@ -280,15 +280,54 @@ function loadTab(tab) {
 
 // ===== Dashboard =====
 
-// Every token-usage chart carries its own time-range switcher.
-const RANGES = [['1h', 'Last 1 hour'], ['24h', 'Last 24 hours'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days']];
+// How much history this install keeps. Loaded once at startup, before any tab
+// renders, because it decides which time ranges and KPI cards even exist.
+// config.js reads it from here too.
+window.AppSettings = { retentionDays: 30 };
+
+async function loadRetention() {
+  try {
+    const r = await api('/settings/retention');
+    window.AppSettings.retentionDays = r.retentionDays ?? 30;
+  } catch (e) {
+    console.warn('Retention settings failed to load, assuming 30 days:', e.message);
+  }
+  RANGES = buildRanges(window.AppSettings.retentionDays);
+}
+
+/**
+ * The range ladder for the current retention window.
+ *
+ * 1h and 24h are always offered (the window can never be shorter than a day).
+ * Above them come the conventional 7d/30d rungs, but only while they fit inside
+ * the window — showing a "30d" button on a 14-day store would promise history
+ * that was already deleted. The window itself is always the widest rung.
+ */
+function buildRanges(days) {
+  const out = [['1h', 'Last 1 hour'], ['24h', 'Last 24 hours']];
+  for (const rung of [7, 30]) {
+    if (days > rung) out.push([`${rung}d`, `Last ${rung} days`]);
+  }
+  if (days > 1) out.push([`${days}d`, `Last ${days} days (everything kept)`]);
+  return out;
+}
+
+let RANGES = buildRanges(30);
+
+/** The widest range offered — the default for every chart. */
+function maxRange() {
+  return RANGES[RANGES.length - 1][0];
+}
 
 const chartRanges = (() => {
   try { return { ...JSON.parse(localStorage.getItem('chartRanges') || '{}') }; }
   catch { return {}; }
 })();
+// A remembered range that no longer fits the window falls back to the widest
+// one that does, so shrinking retention never leaves a chart asking for data
+// that is gone.
 function chartRange(key) {
-  return RANGES.some(([r]) => r === chartRanges[key]) ? chartRanges[key] : '30d';
+  return RANGES.some(([r]) => r === chartRanges[key]) ? chartRanges[key] : maxRange();
 }
 
 const CHART_LOADERS = {
@@ -351,14 +390,20 @@ const KPI_ICONS = {
 };
 
 function renderKpiCards(stats) {
-  const { today, sevenDays, thirtyDays, cacheHitRate30d, activeRuns } = stats;
-  const cacheStatus = cacheHitRate30d >= 50 ? 'ok' : 'warn';
+  const { today, sevenDays, window: windowTotals, retentionDays, cacheHitRatePct, activeRuns } = stats;
+  const days = retentionDays ?? window.AppSettings.retentionDays;
+  const cacheStatus = cacheHitRatePct >= 50 ? 'ok' : 'warn';
+  const totals = t => `${fmt.tokens(t.input)} in · ${fmt.tokens(t.output)} out`;
+  // The 7-day card is server-suppressed (sevenDays: null) once the retention
+  // window is 7 days or less — there it would restate the window card.
   const cards = [
-    { icon: 'today',  label: 'Today',     value: fmt.tokens(today.total),       sub: `${fmt.tokens(today.input)} in · ${fmt.tokens(today.output)} out`, sub2: `~$${today.totalCost?.toFixed(2) ?? '?'} API-equiv` },
-    { icon: 'week',   label: '7 days',    value: fmt.tokens(sevenDays.total),   sub: `${fmt.tokens(sevenDays.input)} in · ${fmt.tokens(sevenDays.output)} out`, sub2: `~$${sevenDays.totalCost?.toFixed(2) ?? '?'} API-equiv` },
-    { icon: 'month',  label: '30 days',   value: fmt.tokens(thirtyDays.total),  sub: `${fmt.tokens(thirtyDays.input)} in · ${fmt.tokens(thirtyDays.output)} out`, sub2: `${fmt.usd(thirtyDays.totalCost)} API-equiv` },
-    { icon: 'cache',  label: 'Cache hit', value: fmt.pct(cacheHitRate30d),      sub: '30-day average', cls: cacheStatus },
-    { icon: 'active', label: 'Active',    value: String(activeRuns ?? 0),       sub: 'runs · 5 min window' },
+    { icon: 'today',  label: 'Today',     value: fmt.tokens(today.total),        sub: totals(today),        sub2: `~$${today.totalCost?.toFixed(2) ?? '?'} API-equiv` },
+    ...(sevenDays ? [
+    { icon: 'week',   label: '7 days',    value: fmt.tokens(sevenDays.total),    sub: totals(sevenDays),    sub2: `~$${sevenDays.totalCost?.toFixed(2) ?? '?'} API-equiv` }] : []),
+    ...(days > 1 ? [
+    { icon: 'month',  label: `${days} days`, value: fmt.tokens(windowTotals.total), sub: totals(windowTotals), sub2: `${fmt.usd(windowTotals.totalCost)} API-equiv` }] : []),
+    { icon: 'cache',  label: 'Cache hit', value: fmt.pct(cacheHitRatePct),       sub: `${days}-day average`, cls: cacheStatus },
+    { icon: 'active', label: 'Active',    value: String(activeRuns ?? 0),        sub: 'runs · 5 min window' },
   ];
   document.getElementById('kpi-row').innerHTML = cards.map(c => `
     <div class="kpi-card ${c.cls ?? ''}">
@@ -685,12 +730,54 @@ function renderRunsTable(rows, total) {
 
 async function loadSettings() {
   try {
-    const [thresholds, pricing] = await Promise.all([api('/settings/thresholds'), api('/settings/pricing')]);
+    const [thresholds, pricing, retention] = await Promise.all([
+      api('/settings/thresholds'), api('/settings/pricing'), api('/settings/retention'),
+    ]);
     renderThresholds(thresholds);
     renderPricing(pricing);
+    renderRetention(retention);
   } catch (e) {
     document.getElementById('thresholds-form').textContent = `Error: ${e.message}`;
   }
+}
+
+function renderRetention(r) {
+  const form = document.getElementById('retention-form');
+  if (!form) return;
+  form.innerHTML = `
+    <div class="retention-row">
+      <input type="number" id="retention-days" class="input-sm" min="${r.minDays}" max="${r.maxDays}" value="${r.retentionDays}">
+      <span class="threshold-unit">days</span>
+      <button id="retention-save" class="btn">Save</button>
+    </div>
+    <p class="text-dim" style="font-size:11px;margin-top:8px">
+      Records older than this are deleted from the local cache (default ${r.defaultDays} days, ${r.minDays}–${r.maxDays} allowed).
+      Charts and KPI cards only offer ranges that fit inside the window.
+      Widening it re-scans your transcripts to restore what is still on disk; narrowing it deletes the excess immediately.
+    </p>`;
+
+  const input = document.getElementById('retention-days');
+  const save = async () => {
+    const days = parseInt(input.value, 10);
+    if (!Number.isFinite(days)) return;
+    const btn = document.getElementById('retention-save');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const res = await apiPut('/settings/retention', { retentionDays: days });
+      window.AppSettings.retentionDays = res.retentionDays;
+      RANGES = buildRanges(res.retentionDays);
+      initRangeGroups();
+      toast(res.rescanned
+        ? `Keeping ${res.retentionDays} days · transcripts re-scanned`
+        : `Keeping ${res.retentionDays} days`);
+    } catch {
+      toast('Save failed');
+    }
+    loadSettings();
+  };
+  document.getElementById('retention-save').addEventListener('click', save);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
 }
 
 const THRESHOLD_LABELS = {
@@ -767,6 +854,9 @@ function renderPricing(p) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   registerEchartsTheme();
+  // Retention decides which ranges exist, so it must land before the first
+  // chart, KPI card or Harness tab is rendered.
+  await loadRetention();
   initRangeGroups();
 
   document.querySelectorAll('[data-tab]').forEach(btn => {

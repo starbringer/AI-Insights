@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { countTokens } from "../../../tokenizer";
 import { GLOBAL_CLAUDE_MD } from "../../../paths";
+import { getRetentionDays, retentionCutoffIso } from "../../../retention";
 import type { InstructionFile, InstructionsReport } from "../../../config/types";
 import { listProjectDirs, pathKey } from "./shared";
 
@@ -53,21 +54,25 @@ export function getInstructionsReport(db: Database): InstructionsReport {
   const files = listInstructionFiles(db);
   const globalTokens = files.find(f => f.scope === "global")?.tokens ?? 0;
 
-  const agentCount30d = db.query<{ n: number }, []>(
-    `SELECT COUNT(DISTINCT agent_id) as n FROM turns WHERE ts >= date('now','-30 days')`
-  ).get()?.n ?? 0;
+  // Counts span the retention window rather than a fixed 30 days: nothing
+  // older than that is in the cache, so a wider claim would be fiction.
+  const cutoff = retentionCutoffIso();
+  const agentCount = db.query<{ n: number }, [string]>(
+    `SELECT COUNT(DISTINCT agent_id) as n FROM turns WHERE ts >= ?`
+  ).get(cutoff)?.n ?? 0;
 
-  const agentsPerDay = db.query<{ date: string; n: number }, []>(
+  const agentsPerDay = db.query<{ date: string; n: number }, [string]>(
     `SELECT date(ts,'localtime') as date, COUNT(DISTINCT agent_id) as n
-     FROM turns WHERE ts >= date('now','-30 days')
+     FROM turns WHERE ts >= ?
      GROUP BY date(ts,'localtime') ORDER BY date`
-  ).all();
+  ).all(cutoff);
 
   return {
     files,
     injection: {
-      agentCount30d,
-      estimatedInjectedTokens30d: globalTokens * agentCount30d,
+      windowDays: getRetentionDays(),
+      agentCount,
+      estimatedInjectedTokens: globalTokens * agentCount,
       dailySeries: agentsPerDay.map(d => ({ date: d.date, injectedTokens: globalTokens * d.n })),
     },
   };

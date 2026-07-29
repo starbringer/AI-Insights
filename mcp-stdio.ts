@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { DATA_DIR } from "./src/paths";
 import { getDb } from "./src/db";
 import { PROVIDERS } from "./src/providers";
+import { getRetentionDays, pruneOldData } from "./src/retention";
 import { handleMessage, expectsResponse, SERVER_NAME, SERVER_VERSION } from "./src/mcp/protocol";
 
 // ============================================================================
@@ -44,6 +45,16 @@ if (NO_SCAN) {
     }
   }
   log("scan complete");
+}
+
+// Enforce the retention window here too: this entry point can be the only
+// process that ever touches the cache on a machine where the dashboard is
+// never started.
+try {
+  const pruned = pruneOldData(db);
+  log(`retention: keeping ${getRetentionDays()} days (pruned ${pruned.turns} turns, ${pruned.events} events)`);
+} catch (e) {
+  log(`retention sweep failed: ${e instanceof Error ? e.message : String(e)}`);
 }
 
 log(`v${SERVER_VERSION} ready on stdio (${PROVIDERS.length} provider(s) registered)`);

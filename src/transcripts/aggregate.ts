@@ -124,10 +124,27 @@ export function getTotals(db: Database, sinceDate?: string, provider?: ProviderF
 
 // ===== Time ranges for the dashboard's per-chart range buttons =====
 
-export type RangeKey = "1h" | "24h" | "7d" | "30d";
+/**
+ * A chart/query time window: the two hour-scale ranges, or any day count.
+ *
+ * Day ranges are open-ended (`"14d"`, `"90d"`) rather than a fixed 7/30 pair
+ * because the retention setting decides how far back data exists — the widest
+ * range the UI offers is always the retention window itself.
+ */
+export type RangeKey = "1h" | "24h" | `${number}d`;
+
+/** Day count of a range, or null for the hour-scale ones. */
+export function rangeDays(range: RangeKey): number | null {
+  const m = /^(\d+)d$/.exec(range);
+  return m ? parseInt(m[1]!, 10) : null;
+}
 
 export function parseRange(raw: string | undefined): RangeKey | null {
-  return raw === "1h" || raw === "24h" || raw === "7d" || raw === "30d" ? raw : null;
+  if (raw === "1h" || raw === "24h") return raw;
+  const m = /^(\d{1,4})d$/.exec(raw ?? "");
+  if (!m) return null;
+  const days = parseInt(m[1]!, 10);
+  return days >= 1 ? `${days}d` : null;
 }
 
 /**
@@ -136,25 +153,25 @@ export function parseRange(raw: string | undefined): RangeKey | null {
  * with calendar days ("last 7 days" = today plus the 6 days before it).
  */
 export function rangeSinceIso(range: RangeKey): string {
-  switch (range) {
-    case "1h":  return new Date(Date.now() - 3600_000).toISOString();
-    case "24h": return new Date(Date.now() - 24 * 3600_000).toISOString();
-    case "7d":  return localMidnightIso(6);
-    case "30d": return localMidnightIso(29);
-  }
+  if (range === "1h")  return new Date(Date.now() - 3600_000).toISOString();
+  if (range === "24h") return new Date(Date.now() - 24 * 3600_000).toISOString();
+  return localMidnightIso((rangeDays(range) ?? 1) - 1);
 }
 
-// Bucket granularity per range: 5-minute slices for 1h, hours for 24h,
-// calendar days otherwise. Labels are local time.
+// Bucket granularity per range: 5-minute slices for 1h, hours for 24h and for
+// day ranges short enough that daily bars would be a handful of points, calendar
+// days otherwise. Labels are local time.
+const HOURLY_BUCKET_MAX_DAYS = 3;
+
 function bucketExpr(range: RangeKey): string {
-  switch (range) {
-    case "1h":
-      return `strftime('%H:', ts, 'localtime') || printf('%02d', (CAST(strftime('%M', ts, 'localtime') AS INTEGER) / 5) * 5)`;
-    case "24h":
-      return `strftime('%m-%d %H:00', ts, 'localtime')`;
-    default:
-      return `date(ts, 'localtime')`;
+  if (range === "1h") {
+    return `strftime('%H:', ts, 'localtime') || printf('%02d', (CAST(strftime('%M', ts, 'localtime') AS INTEGER) / 5) * 5)`;
   }
+  const days = rangeDays(range);
+  if (range === "24h" || (days !== null && days <= HOURLY_BUCKET_MAX_DAYS)) {
+    return `strftime('%m-%d %H:00', ts, 'localtime')`;
+  }
+  return `date(ts, 'localtime')`;
 }
 
 /** Token series bucketed to match the range: 5-min / hourly / daily. */

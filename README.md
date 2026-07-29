@@ -97,6 +97,16 @@ The database is a cache — the JSONL transcripts are the only source of truth.
 Delete `data/cache.db` and restart to force a clean re-parse. The app does this
 itself whenever an update changes the schema version.
 
+### Data retention
+
+The cache keeps a rolling window — **30 days by default**, 1–365 in **Settings →
+Data retention** (`data/retention.json`). Older records are deleted at startup
+and hourly.
+
+The window bounds everything: chart ranges, recorded counts, MCP tool ranges.
+Narrowing deletes the excess at once; widening re-scans transcripts to restore
+what they still hold.
+
 ### Standalone executable
 
 ```bash
@@ -148,15 +158,17 @@ check list, other clients (including stdio) and what is deliberately not exposed
 
 ### Dashboard
 
-- **Five KPI cards** — today / 7-day / 30-day totals with API-equivalent cost, cache hit rate, active runs
+- **KPI cards** — today / 7-day / retention-window totals with API-equivalent cost, cache hit rate, active runs
 - **Token trend chart** — split into input, output, cache write and cache read
 - **Below that** — usage by model, top projects, **MCP token usage** (per-server, with a per-tool tooltip), **skill token usage**, **cache hit rate** with a 50% guide line, **model mix**, and **top 10 runs** (click a bar to jump into that run)
 
 ![Dashboard charts](docs/screenshots/02-dashboard-charts.png)
 
 Every chart has its own range switcher — `1h` / `24h` / `7d` / `30d` — and remembers
-your choice. Costs are API-equivalent reference numbers from an editable pricing
-table, not billing; [details](docs/data-model.md#cost-estimation).
+your choice. The ladder follows the [retention window](#data-retention) — a 14-day
+window offers `1h` / `24h` / `7d` / `14d`. Costs are API-equivalent reference
+numbers from an editable pricing table, not billing;
+[details](docs/data-model.md#cost-estimation).
 
 ### Runs
 
@@ -231,8 +243,8 @@ project commands are editable; plugin commands are read-only.
 #### Skills
 
 Override detection, SKILL.md token cost, `references/` and `scripts/` listings,
-**recorded** invocations and injected tokens over 30 days, and a **trigger
-analyzer** showing which prompt keywords would activate the skill.
+**recorded** invocations and injected tokens over the retention window, and a
+**trigger analyzer** showing which prompt keywords would activate the skill.
 
 **Related components** rounds it out: the hooks, MCP servers and commands this
 skill is wired to, as a graph plus a list — a column per component type, arrows
@@ -245,7 +257,8 @@ references says so instead.
 #### Hooks
 
 Every hook across every settings layer, with its matcher, action type and
-**recorded fire count** for the last 30 days — from the event stream, not estimated.
+**recorded fire count** over the retention window — from the event stream, not
+estimated.
 
 ![Hooks](docs/screenshots/09-hooks.png)
 
@@ -258,7 +271,7 @@ file and leaves the script on disk.
 #### MCP
 
 Servers with scope, transport and tool count on the left; command, source file,
-probe status, 30-day injection estimate and expandable tools with descriptions and
+probe status, injection estimate over the window, and expandable tools with descriptions and
 JSON schemas on the right. Diagnostics live in the default panel; a re-probe button
 bypasses the 10-minute cache.
 
@@ -297,8 +310,9 @@ overrides, and warnings for keys set in a layer the tool never reads.
 
 ### Settings
 
-Warning thresholds behind the ok/warn/error badges on the Harness tabs, and the
-per-model reference pricing that drives every cost number in the app.
+Warning thresholds behind the ok/warn/error badges on the Harness tabs,
+[data retention](#data-retention), and the per-model reference pricing that
+drives every cost number in the app.
 
 ![Settings](docs/screenshots/16-settings.png)
 
@@ -336,6 +350,7 @@ src/
   tokenizer.ts             js-tiktoken wrapper
   pricing.ts               Per-model cost table + computeCost()
   thresholds.ts            Configurable warning thresholds
+  retention.ts             Data-retention window: setting, cutoff, pruning, hourly sweep
   providers/
     types.ts               Provider interface + NormalizedTurn shape
     index.ts               Provider registry, providerForPath / providerById lookups
@@ -372,7 +387,7 @@ src/
     protocol.ts            Transport-independent JSON-RPC / MCP dispatch
   api/
     providerParam.ts       Shared ?provider= resolution (HTTP + MCP)
-    settingsEndpoints.ts   Thresholds (read/write) + pricing (read)
+    settingsEndpoints.ts   Thresholds + retention (read/write) + pricing (read)
     transcriptEndpoints.ts Usage data: stats, timeseries, runs, agents, trees, usage reports
     configEndpoints.ts     /api/config/* — the Harness tabs
     providersEndpoint.ts   GET /api/providers

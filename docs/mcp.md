@@ -110,18 +110,24 @@ mode.
 
 Every tool takes an optional **`provider`** argument naming the data source. It
 defaults to `claude-code`; pass `all` to aggregate across every registered
-source. Unknown ids fail with a message listing the valid ones. The three tools
-whose answer cannot vary by source (`list_providers`, `get_pricing`,
-`get_thresholds`) omit the argument.
+source. Unknown ids fail with a message listing the valid ones. The app-wide
+tools, whose answer cannot vary by source (`list_providers`, `get_pricing`,
+`get_thresholds`, `get_data_retention`), omit the argument.
+
+Every ranged tool takes **`range`** as `1h`, `24h` or N days (`7d`, `30d`, …). It
+defaults to, and is capped at, the [retention window](../README.md#data-retention)
+— the app deletes records older than that (30 days by default), so no tool can
+look further back. `get_usage_summary` reports the window as `retentionDays`, and
+`get_data_retention` returns it on its own.
 
 ### Usage
 
 | Tool | Returns |
 |---|---|
 | `list_providers` | Registered data sources with a live `hasData` flag |
-| `get_usage_summary` | Today / 7d / 30d totals and cost, cache hit rate, active runs |
+| `get_usage_summary` | `retentionDays`, today / 7d (`null` on a window of 7 days or less) / whole-window totals and cost, cache hit rate, active runs |
 | `get_usage_timeseries` | Token trend over a range, bucketed to match it |
-| `get_daily_usage` | Day-by-day totals over up to 365 days |
+| `get_daily_usage` | Day-by-day totals, defaulting to and capped at the retention window |
 | `get_model_usage` | Totals per model |
 | `get_project_usage` | Totals, run and agent counts per project directory |
 | `list_runs` | Paginated session list (`limit`, `offset`, `project`, `search`) |
@@ -138,11 +144,11 @@ whose answer cannot vary by source (`list_providers`, `get_pricing`,
 | Tool | Returns |
 |---|---|
 | `get_harness_capabilities` | Which config sections this provider's adapter supports |
-| `list_instruction_files` | Instruction files with token counts and the 30-day injection series |
+| `list_instruction_files` | Instruction files with token counts and the injection series over the retention window |
 | `read_instruction_file` | Full text of one enumerated instruction file |
 | `list_commands` | Slash commands from all sources, with override marking |
-| `list_skills` | Skills with triggers, token cost and **recorded** 30-day usage |
-| `list_hooks` | Hook entries across settings layers with **recorded** fire counts |
+| `list_skills` | Skills with triggers, token cost and **recorded** usage over the retention window |
+| `list_hooks` | Hook entries across settings layers with **recorded** fire counts over the retention window |
 | `read_hook_script` | Source of a hook's script file |
 | `get_permissions` | Merged allow / deny / ask rules with shadowing marked |
 | `list_mcp_servers` | Configured MCP servers, probe status, tools, schema token cost |
@@ -157,6 +163,7 @@ whose answer cannot vary by source (`list_providers`, `get_pricing`,
 |---|---|
 | `get_pricing` | The per-model reference price table behind every cost figure |
 | `get_thresholds` | Configured warn/error thresholds |
+| `get_data_retention` | How many days of records this install keeps — the hard limit on every range and recorded count |
 
 ### Payload discipline
 
@@ -235,14 +242,14 @@ Invoke it with `/ai-usage-review`, or just ask: *"review my Claude Code usage"*,
 
 | # | Check | Fires on |
 |---|---|---|
-| C1 | Instruction files taxing every turn | A file over ~2,000 tokens, or >2M injected tokens in 30 days |
+| C1 | Instruction files taxing every turn | A file over ~2,000 tokens, or >2M injected tokens over the window |
 | C2 | Premium models doing routine work | Premium tier over 50% of tokens |
-| C3 | Prompt cache not being hit | Under 50% over 30 days; under 30% on a run |
+| C3 | Prompt cache not being hit | Under 50% over the window; under 30% on a run |
 | C4 | Sessions carrying too much context | A single call over 200k tokens, or one run over 20% of the period |
-| C5 | Skills that don't pay for themselves | Zero calls in 30 days, shadowed by an override, or large body / low use |
+| C5 | Skills that don't pay for themselves | Zero calls in the window, shadowed by an override, or large body / low use |
 | C6 | MCP servers costing more than they return | >2,000 schema tokens with zero calls; probe errors |
 | C7 | Rules that should be hooks; hooks that are dead | "Always"/"never" rules in prose; hooks with zero fires |
-| C8 | Repeated work that should be a skill | The same task shape 3+ times in 30 days |
+| C8 | Repeated work that should be a skill | The same task shape 3+ times inside the window |
 | C9 | Sub-agent-heavy runs | Sub-agents over 60% of a run's tokens |
 | C10 | Permission allowlist too thin | Daily-driver commands missing from `allow` |
 | C11 | Settings that do nothing | Keys in ignored layers, shadowed commands/skills, orphaned memory |

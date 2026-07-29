@@ -48,6 +48,15 @@ and the exact fix text for each finding. Then collect, in this order:
 Stop gathering once you can support your findings. A review that reads
 everything is itself an example of the waste you are diagnosing.
 
+**Know your horizon.** The app keeps a rolling window of records (default 30
+days, user-configurable) and deletes everything older, so the window is the hard
+limit on what any tool can tell you. `get_usage_summary` reports it as
+`retentionDays`; `get_data_retention` gives it on its own. Every recorded count —
+skill `calls`, hook `fires`, MCP usage, injected-token estimates — spans that
+window, not a fixed month. Say the real span in your findings ("14 calls in the
+last 7 days"), and when you extrapolate to a monthly saving, scale from the
+window's actual width instead of assuming 30 days.
+
 ## 3. Diagnose
 
 Work through the checks in `references/playbook.md`. For each one that fires,

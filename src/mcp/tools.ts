@@ -8,8 +8,11 @@ import { resolveProvider } from "../api/providerParam";
 import {
   getTotals, getDailySeries, getAgents, getProjects, getModelStats,
   getCacheHitRate, getTopTurns, localMidnightIso, parseRange, rangeSinceIso,
-  getRangeSeries, getMcpUsage, getSkillUsage,
+  getRangeSeries, getMcpUsage, getSkillUsage, type RangeKey,
 } from "../transcripts/aggregate";
+import {
+  DEFAULT_RETENTION_DAYS, clampDays, clampRange, getRetentionDays, retentionRange,
+} from "../retention";
 import { listRuns, loadRun, getTopRuns, getActiveRuns } from "../transcripts/runs";
 import { getRunUsage } from "../transcripts/usageReport";
 import type { UsageAdvice } from "../transcripts/usageReport";
@@ -61,8 +64,9 @@ const providerProp = {
 const rangeProp = {
   range: {
     type: "string",
-    enum: ["1h", "24h", "7d", "30d"],
-    description: "Time window. Default 30d.",
+    pattern: "^(1h|24h|\\d{1,4}d)$",
+    description:
+      `Time window: "1h", "24h", or N days ("7d", "30d", …). Defaults to — and is capped at — the configured retention window (default ${DEFAULT_RETENTION_DAYS}d; see get_usage_summary.retentionDays). Nothing older than that is stored.`,
   },
 } as const;
 
@@ -128,8 +132,13 @@ function capabilityOr(a: ReturnType<typeof adapter>, method: keyof typeof a, lab
   if (!a[method]) throw new Error(`${label} is not supported by provider "${a.providerId}"`);
 }
 
-function rangeOf(args: Record<string, unknown>, fallback: "1h" | "24h" | "7d" | "30d" = "30d") {
-  return parseRange(str(args, "range")) ?? fallback;
+/**
+ * The range for a tool call: what was asked for, narrowed to the retention
+ * window (asking for 90d when only 30 are kept would misreport the answer's
+ * span), defaulting to the whole window.
+ */
+function rangeOf(args: Record<string, unknown>): RangeKey {
+  return clampRange(parseRange(str(args, "range")) ?? retentionRange());
 }
 
 // ---- advice rendering -------------------------------------------------------
@@ -183,18 +192,22 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: "get_usage_summary",
     title: "Usage summary",
     description:
-      "Headline token and cost totals for today, the last 7 days and the last 30 days, plus the 30-day cache hit rate and the count of currently active runs. The starting point for any usage review.",
+      "Headline token and cost totals for today, the last 7 days and the whole retention window, plus that window's cache hit rate and the count of currently active runs. Also reports `retentionDays` — how much history this install keeps — which caps every other tool's range. The starting point for any usage review.",
     inputSchema: { type: "object", properties: { ...providerProp }, additionalProperties: false },
     handler: args => {
       const p = providerFilter(args);
       const db = getDb();
+      const retentionDays = getRetentionDays();
+      const windowSince = rangeSinceIso(retentionRange());
       return {
+        retentionDays,
         today: getTotals(db, localMidnightIso(0), p),
-        sevenDays: getTotals(db, localMidnightIso(7), p),
-        thirtyDays: getTotals(db, localMidnightIso(30), p),
-        cacheHitRate30dPct: getCacheHitRate(db, localMidnightIso(30), p),
+        // Null below an 8-day window: it would just be the window total again.
+        sevenDays: retentionDays > 7 ? getTotals(db, localMidnightIso(7), p) : null,
+        window: { days: retentionDays, totals: getTotals(db, windowSince, p) },
+        cacheHitRatePct: getCacheHitRate(db, windowSince, p),
         activeRuns: getActiveRuns(db, undefined, p),
-        note: "Costs are API-equivalent estimates from the local pricing table, not billing.",
+        note: "Costs are API-equivalent estimates from the local pricing table, not billing. Records older than retentionDays are deleted, so no tool can look further back.",
       };
     },
   },
@@ -412,19 +425,24 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: "get_daily_usage",
     title: "Daily usage history",
     description:
-      "Day-by-day token totals over the last N days (default 30). Longer history than get_usage_timeseries, which caps at 30 days.",
+      "Day-by-day token totals, always in daily buckets (get_usage_timeseries re-buckets to 5-minute or hourly slices on short ranges). Defaults to the full retention window and is capped there.",
     inputSchema: {
       type: "object",
       properties: {
         ...providerProp,
-        days: { type: "integer", minimum: 1, maximum: 365, description: "Days of history. Default 30." },
+        days: {
+          type: "integer",
+          minimum: 1,
+          maximum: 365,
+          description: "Days of history. Defaults to, and is capped at, the retention window.",
+        },
       },
       additionalProperties: false,
     },
-    handler: args => ({
-      days: Math.min(int(args, "days", 30), 365),
-      buckets: getDailySeries(getDb(), Math.min(int(args, "days", 30), 365), providerFilter(args)),
-    }),
+    handler: args => {
+      const days = clampDays(int(args, "days", getRetentionDays()));
+      return { days, buckets: getDailySeries(getDb(), days, providerFilter(args)) };
+    },
   },
 
   // ---- harness configuration ----------------------------------------------
@@ -443,7 +461,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: "list_instruction_files",
     title: "Instruction files",
     description:
-      "Every always-injected instruction file (CLAUDE.md and friends) with its token and word count, plus an estimate of how many tokens they injected per day over the last 30 days. The single biggest lever on per-turn cost.",
+      "Every always-injected instruction file (CLAUDE.md and friends) with its token and word count, plus an estimate of how many tokens they injected per day over the retention window (`injection.windowDays`). The single biggest lever on per-turn cost.",
     inputSchema: { type: "object", properties: { ...providerProp }, additionalProperties: false },
     handler: args => {
       const a = adapter(args);
@@ -495,7 +513,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: "list_skills",
     title: "Skills",
     description:
-      "Every installed skill with its description, token cost, trigger keywords, bundled references/scripts, and its RECORDED invocations and injected tokens over 30 days. Comparing cost against calls is how you find skills that are not paying for themselves. Bodies are omitted unless includeContent is set.",
+      "Every installed skill with its description, token cost, trigger keywords, bundled references/scripts, and its RECORDED invocations (`calls`) and injected tokens (`estTokens`) over the retention window. Comparing cost against calls is how you find skills that are not paying for themselves. Bodies are omitted unless includeContent is set.",
     inputSchema: {
       type: "object",
       properties: {
@@ -516,7 +534,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: "list_hooks",
     title: "Hooks",
     description:
-      "Every configured hook across all settings layers, with its event, matcher, action type, resolved script path and RECORDED fire count over 30 days. A hook that never fires is either mis-matched or dead config.",
+      "Every configured hook across all settings layers, with its event, matcher, action type, resolved script path and RECORDED fire count (`fires`) over the retention window (`windowDays`). A hook that never fires is either mis-matched or dead config.",
     inputSchema: { type: "object", properties: { ...providerProp }, additionalProperties: false },
     handler: args => {
       const a = adapter(args);
@@ -669,6 +687,19 @@ export const MCP_TOOLS: McpToolDef[] = [
     description: "The configured warn/error thresholds behind the ok/warn/error badges on the dashboard's Harness tabs.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     handler: () => getThresholds(),
+  },
+  {
+    name: "get_data_retention",
+    title: "Data retention window",
+    description:
+      "How many days of records this install keeps. Everything older is deleted from the local cache, so this is the hard limit on every range, every recorded call/fire count and every historical claim you can make. Check it before reporting a trend as \"over the last N days\".",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    handler: () => ({
+      retentionDays: getRetentionDays(),
+      defaultDays: DEFAULT_RETENTION_DAYS,
+      oldestRetainedTimestamp: rangeSinceIso(retentionRange()),
+      note: "User-configurable in the dashboard's Settings tab. This server is read-only and cannot change it.",
+    }),
   },
 ];
 

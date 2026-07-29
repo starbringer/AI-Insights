@@ -74,6 +74,29 @@ the app starts and finds a different version it drops and recreates everything,
 then re-parses every transcript. Deleting `data/cache.db` forces the same rebuild.
 A rebuild is safe at any time: the JSONL transcripts are the only source of truth.
 
+## Retention
+
+The cache holds a rolling window — `retentionDays` in `data/retention.json`, 30 by
+default, editable on the **Settings** page. A sweep runs at startup and hourly:
+
+1. `turns` and `events` older than the cutoff are deleted,
+2. then `agents` left with no turns at all *and* last seen before the cutoff,
+3. then `runs` left with no agents.
+
+So a session that started before the cutoff but is still active gets trimmed, not
+dropped, and an agent that has not recorded a turn yet is never mistaken for an
+aged-out one.
+
+`files` is deliberately exempt: it holds each transcript's parsed byte offset, and
+clearing a row would make the next scan re-read the whole file and re-insert the
+rows the sweep just deleted. That is also why **widening** the window clears
+`files` on purpose and re-scans — the only way to bring back history that is still
+sitting in the transcripts.
+
+The cutoff is local midnight `retentionDays - 1` days ago, so the window covers
+whole calendar days and lines up exactly with the widest chart range. It is never
+newer than 24 hours ago, so the `24h` range stays whole even at a 1-day setting.
+
 ## Cost estimation
 
 Costs are **API-equivalent reference numbers**, not billing. Each turn's tokens are

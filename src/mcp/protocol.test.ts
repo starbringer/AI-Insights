@@ -124,8 +124,8 @@ test("every tool has a non-trivial description and a closed schema", () => {
 });
 
 test("every data tool accepts a provider argument", () => {
-  // Only the three tools whose answer cannot vary per source are exempt.
-  const exempt = new Set(["list_providers", "get_pricing", "get_thresholds"]);
+  // Only the app-wide tools, whose answer cannot vary per source, are exempt.
+  const exempt = new Set(["list_providers", "get_pricing", "get_thresholds", "get_data_retention"]);
   for (const t of MCP_TOOLS) {
     if (exempt.has(t.name)) continue;
     expect(Object.keys(t.inputSchema.properties)).toContain("provider");

@@ -31,10 +31,14 @@ export interface InstructionFile {
 
 export interface InstructionsReport {
   files: InstructionFile[];
-  /** Injection cost estimate: global instructions × active agents per day. */
+  /**
+   * Injection cost estimate: global instructions × active agents per day.
+   * Counts cover the retention window, whose width is `windowDays`.
+   */
   injection: {
-    agentCount30d: number;
-    estimatedInjectedTokens30d: number;
+    windowDays: number;
+    agentCount: number;
+    estimatedInjectedTokens: number;
     dailySeries: { date: string; injectedTokens: number }[];
   };
 }
@@ -80,8 +84,8 @@ export interface SkillDetail {
   references: string[];       // files under references/
   scripts: string[];          // files under scripts/
   triggers: SkillTrigger[];
-  calls30d: number;           // recorded invocations from the event stream
-  estTokens30d: number;       // estimated tokens injected by those calls
+  calls: number;              // recorded invocations from the event stream, over the retention window
+  estTokens: number;          // estimated tokens injected by those calls
   editable: boolean;
   overriddenBy?: string;
 }
@@ -106,12 +110,13 @@ export interface HookEntryInfo {
   sourcePath: string;
   projectDir?: string;
   matcherIndex: number;
-  fires30d: number;           // recorded fires from the transcript event stream
+  fires: number;              // recorded fires from the transcript event stream, over the retention window
 }
 
 export interface HooksReport {
   entries: HookEntryInfo[];
-  totalFires30d: number;
+  totalFires: number;
+  windowDays: number;         // width of the retention window the counts cover
 }
 
 // ---- Permissions -------------------------------------------------------------
@@ -326,7 +331,8 @@ export interface ToolConfigAdapter {
   listProjects?(db: Database): string[];
   permissionModel?(db: Database, projectDir?: string): PermissionModelInfo;
 
-  mcpReport?(db: Database, forceRefresh?: boolean): Promise<McpReport & { agents30d: number }>;
+  /** `agents` counts distinct agents over the retention window (`windowDays`). */
+  mcpReport?(db: Database, forceRefresh?: boolean): Promise<McpReport & { agents: number; windowDays: number }>;
 
   listMemoryStores?(db: Database): MemoryStoreInfo[];
 

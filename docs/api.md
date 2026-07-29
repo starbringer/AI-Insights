@@ -32,13 +32,17 @@ and `404`s on a mismatch.
 
 ## Usage data
 
-Routes marked *ranged* accept `?range=1h\|24h\|7d\|30d`. Bucket size adapts:
-5-minute slices for `1h`, hourly for `24h`, daily otherwise.
+Routes marked *ranged* accept `?range=`, as either `1h`, `24h` or N days
+(`7d`, `14d`, `30d`, …). Bucket size adapts: 5-minute slices for `1h`, hourly for
+`24h` and for day ranges of 3 days or less, daily otherwise.
+
+The range defaults to — and is capped at — the [retention window](#settings): records older than that are deleted, so `?range=90d` on a
+30-day install is answered as `30d` rather than pretending to reach further back.
 
 | Route | Description |
 |---|---|
-| `GET /api/stats` | KPI totals: today, 7d, 30d, cache hit rate, active runs |
-| `GET /api/timeseries` | *ranged* — token trend (input / output / cache write / cache read) |
+| `GET /api/stats` | KPI totals: `retentionDays`, `today`, `sevenDays` (`null` when the window is 7 days or less), `window` (totals over the whole retention window), `cacheHitRatePct`, `activeRuns` |
+| `GET /api/timeseries` | *ranged* — token trend (input / output / cache write / cache read). Without `?range=`, `?days=N` returns daily buckets, capped at the retention window |
 | `GET /api/models` | *ranged* — totals per model |
 | `GET /api/projects` | *ranged* — totals per project cwd, with run and agent counts |
 | `GET /api/runs` | Paginated run list; `?limit=`, `?offset=`, `?search=`, `?project=` |
@@ -58,21 +62,21 @@ Routes marked *ranged* accept `?range=1h\|24h\|7d\|30d`. Bucket size adapts:
 |---|---|
 | `GET /api/config/capabilities` | What the active adapter supports — drives which tabs appear |
 | `GET /api/config/projects` | Project directories discovered from transcripts (for the scope selectors) |
-| `GET /api/config/instructions` | Instruction files + injected-tokens series |
+| `GET /api/config/instructions` | Instruction files + injected-tokens series. `injection` carries `windowDays`, `agentCount` and `estimatedInjectedTokens` over the retention window |
 | `GET /api/config/instructions/file?path=` | Raw file content |
 | `PUT /api/config/instructions/file` | Write one enumerated instruction file |
 | `GET /api/config/commands` | Slash commands from all sources, with override marking |
 | `PUT /api/config/commands/file` | Write one editable command file |
 | `POST /api/config/commands` | Create a command |
 | `DELETE /api/config/commands` | Delete an editable command |
-| `GET /api/config/skills` | Skills with triggers, token cost and recorded usage |
+| `GET /api/config/skills` | Skills with triggers, token cost and recorded usage (`calls` / `estTokens`, over the retention window) |
 | `PUT /api/config/skills/file` | Write one editable SKILL.md |
-| `GET /api/config/hooks` | Hook entries across settings layers + recorded fires |
+| `GET /api/config/hooks` | Hook entries across settings layers + recorded fires (`entries[].fires`, `totalFires`, `windowDays`) |
 | `GET /api/config/hooks/script?path=` | Read a hook's script file |
 | `PUT /api/config/hooks/script` | Write a hook's script file |
 | `DELETE /api/config/hooks` | Remove a hook entry from its settings file |
 | `GET /api/config/permissions` | Merged allow/deny/ask rules; `?project=` adds project layers |
-| `GET /api/config/mcp` | MCP servers, probe status, tools, schemas, diagnostics |
+| `GET /api/config/mcp` | MCP servers, probe status, tools, schemas, diagnostics, plus `agents` / `windowDays` for the injection estimate |
 | `GET /api/config/memory` | Per-project memory stores |
 | `GET /api/config/effective` | Merged settings layers; `?project=` selects the project layer. Keys Claude Code accumulates rather than overrides (`permissions.allow` / `deny` / `ask`) return every layer's rules concatenated and carry `mergedLevels` instead of `overriddenLevels` |
 | `GET /api/config/dependencies` | Dependency graph: nodes, edges, dependency chains, stats. Feeds "Related components" in the Skills and MCP tabs |
@@ -85,6 +89,7 @@ Write routes only accept paths the matching list endpoint enumerated — see
 | Route | Description |
 |---|---|
 | `GET /api/settings/thresholds` · `PUT /api/settings/thresholds` | Warning/error thresholds behind the ok/warn/error badges on the Harness tabs. `PUT` merges the keys you send and persists to `data/thresholds.json` |
+| `GET /api/settings/retention` · `PUT /api/settings/retention` | How many days of records to keep. `GET` returns `{ retentionDays, defaultDays, minDays, maxDays }`; `PUT { retentionDays }` clamps to 1–365, persists to `data/retention.json`, and returns `{ retentionDays, previousDays, rescanned, pruned }`. Narrowing prunes the excess immediately; widening clears the parse offsets and re-scans every transcript, so the response can take a few seconds |
 | `GET /api/settings/pricing` | Per-model reference pricing that drives every cost number. Read-only over HTTP — edit `data/pricing.json` to change it |
 
 ## MCP
