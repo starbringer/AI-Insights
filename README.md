@@ -18,8 +18,6 @@ counts, costs, session history, configuration health.
 - **`ai-change-impact` skill** — measures what an improvement actually saved, in dollars
 - **Provider-agnostic** — today it parses Claude Code's JSONL transcripts; other sources can plug in later
 
-Both the MCP server and the skills are set up automatically at startup — [details](docs/mcp.md).
-
 **Privacy**
 
 | | |
@@ -41,82 +39,51 @@ Both the MCP server and the skills are set up automatically at startup — [deta
 
 ## Setup
 
-```bash
-# 1. Install Bun
-curl -fsSL https://bun.sh/install | bash          # macOS / Linux
-powershell -c "irm bun.sh/install.ps1 | iex"      # Windows
+**1. Install Bun** — macOS / Linux:
 
-# 2. Get the code and run it
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+Windows:
+
+```powershell
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+**2. Get the code:**
+
+```bash
 git clone https://github.com/starbringer/ai-insights.git
+```
+
+```bash
 cd ai-insights
+```
+
+**3. Install dependencies:**
+
+```bash
 bun install
+```
+
+**4. Run it:**
+
+```bash
 bun run start
 ```
 
-That's it. What happens next:
+The browser opens on **http://localhost:5757** — otherwise open it yourself.
 
-- **The browser opens** on **http://localhost:5757** (Windows, macOS, Linux with `xdg-open`) — otherwise open it yourself.
-- **First start scans** every transcript under `~/.claude/projects/`, builds `data/cache.db`, then watches those files. New activity shows up within a couple of seconds, no restart. A large history takes a few seconds; the page is usable after the first pass.
-- **No data yet?** The app still loads and tells you where it expected to find it.
-- **Your AI gets access too** — the same command serves the MCP endpoint at `http://127.0.0.1:5757/mcp`, installs the `ai-usage-review` and `ai-change-impact` skills into every detected AI tool, and registers the server with each. Restart your AI tool once, then run `/ai-usage-review`.
+That one command installs four things, idempotently:
 
-No extra command, no second process, no Docker. Every step is idempotent and prints
-one line the first time only. Opt out with `--no-provision`. Full reference:
-**[docs/mcp.md](docs/mcp.md)**.
+- **The app** — dashboard, file watcher and HTTP API
+- **The MCP server** — served at `http://127.0.0.1:5757/mcp`, registered with every detected AI tool
+- **The `ai-usage-review` skill** — installed into every detected AI tool
+- **The `ai-change-impact` skill** — installed into every detected AI tool
 
-### Command-line options
-
-```bash
-bun run server.ts --port=8080 --no-browser
-```
-
-| Flag | Description |
-|------|-------------|
-| `--port=N` | Listen on port N (default: `5757`) |
-| `--host=H` | Bind address (default: `127.0.0.1`) — the config API can edit files, so it stays loopback-only unless you opt in to `0.0.0.0`. [Why](docs/architecture.md#network-binding) |
-| `--no-browser` | Don't auto-open the browser |
-| `--static-only` | Skip the file watcher (and the browser) — the startup scan still runs, but later changes need a restart |
-| `--no-provision` | Don't install the skill or register the MCP server with your AI tools. `/mcp` is still served |
-
-The environment variables `PORT` and `HOST` work too.
-
-### Scripts
-
-| Script | Does |
-|---|---|
-| `bun run start` | Server + MCP endpoint (same as `bun run server.ts`) |
-| `bun run dev` | Hot-reload with `--watch` |
-| `bun run mcp` | MCP server over stdio, for clients that can't use HTTP |
-| `bun run typecheck` | `tsc --noEmit` |
-| `bun run test` | Unit test suite |
-| `bun run build` | Standalone binary for the current platform |
-| `bun run build:mcp` | Standalone binary of the stdio MCP server |
-
-### Rebuilding the cache
-
-The database is a cache — the JSONL transcripts are the only source of truth.
-Delete `data/cache.db` and restart to force a clean re-parse. The app does this
-itself whenever an update changes the schema version.
-
-### Data retention
-
-The cache keeps a rolling window — **30 days by default**, 1–365 in **Settings →
-Data retention** (`data/retention.json`). Older records are deleted at startup
-and hourly.
-
-The window bounds everything: chart ranges, recorded counts, MCP tool ranges.
-Narrowing deletes the excess at once; widening re-scans transcripts to restore
-what they still hold.
-
-### Standalone executable
-
-```bash
-bun run build   # → dist/ai-insights (.exe on Windows), ~60MB, no Bun install needed
-```
-
-- Ship `static/` and `assets/` alongside the binary — all three plus the `data/` cache resolve next to the executable, so it launches from any working directory.
-- Without `assets/`, everything works except installing the bundled skill.
-- Cross-compile with a target: `bun build --compile --target=bun-<windows|darwin|linux>-x64 server.ts --outfile dist/ai-insights` (`bun-darwin-arm64` for Apple Silicon).
+Restart your AI tool once so it picks them up, then run `/ai-usage-review`.
+Opt out with `--no-provision`.
 
 ---
 
@@ -126,32 +93,36 @@ bun run build   # → dist/ai-insights (.exe on Windows), ~60MB, no Bun install 
 conversation and configuration name replaced by consistent stand-ins — see
 [docs/screenshots/](docs/screenshots/).*
 
-### MCP server and skills
+### MCP server
 
-Everything the dashboard shows is also a **read-only MCP server on the app's own
-port** — 33 tools covering usage, change impact and harness configuration. Two
-bundled skills consume it: **`ai-usage-review`** turns the numbers into ranked,
-evidence-backed fixes, and **`ai-change-impact`** measures what a change actually
-saved.
+Everything the dashboard shows, exposed to your AI assistant as 33 **read-only**
+tools on the app's own port — usage, change impact and harness configuration.
+Nothing writes: the assistant applies what you accept through its own
+permission-gated edit tools.
 
-**Every tool is read-only by design.** The skills propose; your assistant applies
-what you accept through its normal, permission-gated edit tools. Setup, every
-tool, both skills, other clients (including stdio) and what is deliberately not
-exposed: **[docs/mcp.md](docs/mcp.md)**. How to invoke the skills, with worked
-examples: **[docs/skills.md](docs/skills.md)**.
+Every tool, other clients (including stdio) and what is deliberately not exposed:
+**[docs/mcp.md](docs/mcp.md)**.
+
+### Skills
+
+Two bundled skills consume those tools:
+
+- **`ai-usage-review`** — turns the numbers into ranked, evidence-backed fixes
+- **`ai-change-impact`** — measures what a change actually saved, in dollars
+
+How to invoke them, with worked examples: **[docs/skills.md](docs/skills.md)**.
 
 ### Dashboard
 
-KPI cards and a token trend split by input, output and cache, then breakdowns by
-model, project, MCP server and skill. Every chart has its own range switcher.
+KPI cards, a token trend split by input, output and cache, then breakdowns by
+model, project, MCP server and skill.
 
 ![Dashboard charts](docs/screenshots/02-dashboard-charts.png)
 
 ### Runs
 
-Every recorded session with project, agent count, turns and token totals —
-searchable and filterable. Each row carries the run's id, which is what you hand
-to `ai-change-impact` to compare two sessions.
+Every recorded session, searchable and filterable. Each row's run id is what you
+hand to `ai-change-impact` to compare two sessions.
 
 ![Runs](docs/screenshots/03-runs.png)
 
@@ -160,15 +131,13 @@ A **run** is one logical session → one or more **agents** (one transcript each
 
 ### Run detail
 
-A three-panel replay: agents on the left, the session tree in the middle, full
-node detail on the right. Prompts, LLM calls, tool and MCP calls, hook fires,
-sub-agent spawns, compactions and errors, in order.
+A three-panel replay of one session: prompts, LLM calls, tool and MCP calls, hook
+fires, sub-agent spawns, compactions and errors, in order.
 
 ![Run detail — session tree](docs/screenshots/04-run-detail-tree.png)
 
-The second tab is a cost breakdown for that one run — spend curve, per-model
-table, a base / MCP / skills / sub-agents donut, and tuning advice computed from
-this run's real numbers.
+The second tab breaks that run's cost down, and the advice is computed from this
+run's real numbers rather than generic rules.
 
 ![Run detail — usage](docs/screenshots/05-run-detail-usage.png)
 
@@ -177,8 +146,7 @@ this run's real numbers.
 Inspect — and where safe, edit — the active tool's configuration. Each tab
 appears only if the active provider supports that capability.
 
-**CLAUDE.md** — every instruction file the tool injects, with token counts, an
-inline editor, and a timeline of injected tokens per day.
+**CLAUDE.md** — every instruction file the tool injects, with an inline editor.
 
 ![CLAUDE.md](docs/screenshots/06-claudemd.png)
 
@@ -187,14 +155,13 @@ override detection so you can see which definition wins.
 
 ![Commands](docs/screenshots/07-commands.png)
 
-**Skills** — token cost, recorded invocations, a trigger analyzer, and a
-**Related components** graph of the hooks, servers and commands each skill is
-wired to.
+**Skills** — cost, recorded invocations, a trigger analyzer, and the hooks,
+servers and commands each skill is wired to.
 
 ![Skills](docs/screenshots/08-skills.png)
 
-**Hooks** — every hook across every settings layer with its matcher and
-**recorded fire count**, from the event stream rather than estimated.
+**Hooks** — every hook across every settings layer. The fire count is recorded
+from the event stream, not estimated.
 
 ![Hooks](docs/screenshots/09-hooks.png)
 
@@ -203,14 +170,14 @@ save it.
 
 ![Hook script editor](docs/screenshots/10-hooks-script.png)
 
-**MCP** — scope, transport, probe status, injection estimate, and expandable
-tools with their JSON schemas. Servers are read from config files, never
-executed — [why](docs/architecture.md#mcp-why-config-files-not-the-cli).
+**MCP** — scope, transport, probe status, injection estimate, and expandable tool
+schemas. Servers are read from config files, never executed —
+[why](docs/architecture.md#mcp-why-config-files-not-the-cli).
 
 ![MCP](docs/screenshots/11-mcp.png)
 
-**Permissions** — `allow` / `deny` / `ask` rules across layers, merged into the
-effective set, with shadowed rules struck through.
+**Permissions** — rules across layers merged into the effective set, with
+shadowed rules struck through.
 
 ![Permissions](docs/screenshots/12-permissions.png)
 
@@ -219,23 +186,22 @@ for files the index never links.
 
 ![Memory](docs/screenshots/13-memory.png)
 
-**Configs** — a read-only merged view of the settings layers: each key's winning
-value, what it overrides, and warnings for keys set in a layer the tool never
-reads.
+**Configs** — the merged settings layers, with warnings for keys set in a layer
+the tool never reads.
 
 ![Effective Configs](docs/screenshots/15-configs.png)
 
 ### Settings
 
-Warning thresholds behind the Harness badges, [data retention](#data-retention),
-and the per-model reference pricing that drives every cost number.
+Warning thresholds behind the Harness badges, data retention, and the per-model
+reference pricing that drives every cost number.
 
 ![Settings](docs/screenshots/16-settings.png)
 
 ### Themes and data sources
 
-Light and dark themes that persist and re-theme charts in place, and a
-**Source ▾** switcher listing every registered provider and which have data.
+Themes persist and re-theme charts in place. **Source ▾** lists every registered
+provider and which have data.
 
 ![Dark theme](docs/screenshots/17-dashboard-dark.png)
 
@@ -247,6 +213,8 @@ Every screen's full control reference: **[docs/ui.md](docs/ui.md)**.
 
 | Document | Contents |
 |---|---|
+| [docs/cli.md](docs/cli.md) | Command-line options, environment variables, scripts, standalone build |
+| [docs/storage.md](docs/storage.md) | The cache, rebuilding it, and the data-retention window |
 | [docs/ui.md](docs/ui.md) | Every screen and the controls it carries, with screenshots |
 | [docs/skills.md](docs/skills.md) | Both skills: how to invoke them, worked examples, the review→apply→measure loop |
 | [docs/mcp.md](docs/mcp.md) | The MCP server: setup, every tool, other clients, what is not exposed, security |

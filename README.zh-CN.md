@@ -18,8 +18,6 @@
 - **`ai-change-impact` 技能** —— 用美元衡量一次改进到底省下了多少
 - **与具体工具解耦** —— 目前解析 Claude Code 的 JSONL 转录文件，后续可接入其他数据源
 
-MCP 服务器和技能都在应用启动时自动配置好 —— [详见文档](docs/mcp.zh-CN.md)。
-
 **隐私**
 
 | | |
@@ -43,78 +41,51 @@ MCP 服务器和技能都在应用启动时自动配置好 —— [详见文档]
 
 ## 安装与启动
 
-```bash
-# 1. 安装 Bun
-curl -fsSL https://bun.sh/install | bash          # macOS / Linux
-powershell -c "irm bun.sh/install.ps1 | iex"      # Windows
+**1. 安装 Bun** —— macOS / Linux：
 
-# 2. 拉代码并运行
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+Windows：
+
+```powershell
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+**2. 拉取代码：**
+
+```bash
 git clone https://github.com/starbringer/ai-insights.git
+```
+
+```bash
 cd ai-insights
+```
+
+**3. 安装依赖：**
+
+```bash
 bun install
+```
+
+**4. 运行：**
+
+```bash
 bun run start
 ```
 
-就这些。接下来会发生：
+浏览器会自动打开 **http://localhost:5757** —— 否则请手动访问。
 
-- **浏览器自动打开** **http://localhost:5757**（Windows、macOS，以及有 `xdg-open` 的 Linux）—— 否则请手动访问。
-- **首次启动扫描** `~/.claude/projects/` 下的所有转录文件，构建 `data/cache.db`，随后持续监听。新活动几秒内出现，无需重启。历史较多时扫描需几秒，首轮完成后页面即可使用。
-- **还没有数据？** 应用照常加载，并告诉你它期望在哪里找数据。
-- **你的 AI 也能读它** —— 同一条命令会在 `http://127.0.0.1:5757/mcp` 提供 MCP 端点，把 `ai-usage-review` 和 `ai-change-impact` 技能安装到检测到的每个 AI 工具，并向它们注册服务器。重启一次 AI 工具，然后运行 `/ai-usage-review`。
+这一条命令会幂等地装好四样东西：
 
-没有额外命令、没有第二个进程、不需要 Docker。每一步都幂等，只在首次运行时打印一行。
-用 `--no-provision` 可关闭。完整参考：**[docs/mcp.zh-CN.md](docs/mcp.zh-CN.md)**。
+- **应用本身** —— 仪表盘、文件监听器与 HTTP API
+- **MCP 服务器** —— 在 `http://127.0.0.1:5757/mcp` 提供服务，并注册到检测到的每个 AI 工具
+- **`ai-usage-review` 技能** —— 安装到检测到的每个 AI 工具
+- **`ai-change-impact` 技能** —— 安装到检测到的每个 AI 工具
 
-### 命令行参数
-
-```bash
-bun run server.ts --port=8080 --no-browser
-```
-
-| 参数 | 说明 |
-|------|------|
-| `--port=N` | 监听端口 N（默认 `5757`） |
-| `--host=H` | 绑定地址（默认 `127.0.0.1`）—— 配置 API 可以写文件，因此默认只监听回环地址，除非你主动改成 `0.0.0.0`。[原因](docs/architecture.zh-CN.md#网络绑定) |
-| `--no-browser` | 不自动打开浏览器 |
-| `--static-only` | 跳过文件监听（以及浏览器）—— 启动扫描仍会执行，但之后的变更需重启才读取 |
-| `--no-provision` | 不安装技能、也不向 AI 工具注册 MCP 服务器。`/mcp` 端点仍然提供服务 |
-
-环境变量 `PORT` 和 `HOST` 同样有效。
-
-### 脚本命令
-
-| 命令 | 作用 |
-|---|---|
-| `bun run start` | 启动服务 + MCP 端点（等价于 `bun run server.ts`） |
-| `bun run dev` | `--watch` 热重载 |
-| `bun run mcp` | 以 stdio 运行 MCP 服务器，供无法使用 HTTP 的客户端 |
-| `bun run typecheck` | `tsc --noEmit` |
-| `bun run test` | 单元测试 |
-| `bun run build` | 编译当前平台的独立可执行文件 |
-| `bun run build:mcp` | 把 stdio MCP 服务器编译为独立可执行文件 |
-
-### 重建缓存
-
-数据库只是缓存 —— JSONL 转录文件才是唯一的事实来源。删除 `data/cache.db` 后重启即可
-强制全量重新解析。版本更新导致 schema 版本变化时，应用会自动做同样的重建。
-
-### 数据保留
-
-缓存只保留一个滚动时间窗 —— **默认 30 天**，可在 **Settings（设置）→ 数据保留** 中改为
-1–365 天（`data/retention.json`）。更早的记录会在启动时及之后每小时删除。
-
-窗口决定一切上限：图表范围、各类实际计数、MCP 工具的 range。调小会立即删除超出部分；
-调大则重新扫描转录文件，尽量恢复其中仍存在的历史。
-
-### 独立可执行文件
-
-```bash
-bun run build   # → dist/ai-insights（Windows 为 .exe），约 60MB，无需安装 Bun
-```
-
-- 分发时把 `static/` 与 `assets/` 一并附上 —— 它们和 `data/` 缓存都相对可执行文件定位，因此可在任意工作目录启动。
-- 缺少 `assets/` 时其余功能照常，只是无法安装内置技能。
-- 交叉编译加目标平台：`bun build --compile --target=bun-<windows|darwin|linux>-x64 server.ts --outfile dist/ai-insights`（Apple Silicon 用 `bun-darwin-arm64`）。
+重启一次 AI 工具让它读到这些，然后运行 `/ai-usage-review`。
+用 `--no-provision` 可关闭。
 
 ---
 
@@ -123,29 +94,35 @@ bun run build   # → dist/ai-insights（Windows 为 .exe），约 60MB，无需
 *下方截图取自真实使用记录，其中所有项目名、路径、会话内容和配置名称都被替换成了一致的
 替身数据 —— 详见 [docs/screenshots/](docs/screenshots/)。*
 
-### MCP 服务器与技能
+### MCP 服务器
 
-仪表盘展示的一切，也以运行在应用自身端口上的**只读 MCP 服务器**提供给你的 AI 助手 ——
-共 33 个工具，覆盖用量、改进效果与 harness 配置。两个内置技能消费这些数据：
-**`ai-usage-review`** 把数字变成按预估节省排序、有据可依的改进项，
-**`ai-change-impact`** 衡量一次改动实际省下了多少。
+仪表盘展示的一切，都以运行在应用自身端口上的 33 个**只读**工具提供给你的 AI 助手 ——
+覆盖用量、改进效果与 harness 配置。没有任何写操作：你接受的改动，由助手用其自身
+受权限管控的编辑工具落地。
 
-**所有工具按设计只读。** 技能只负责建议；由你的助手用其常规、受权限管控的编辑工具落地
-你接受的那部分。安装、全部工具、两个技能、其他客户端（含 stdio）以及刻意未暴露的部分，
-见 **[docs/mcp.zh-CN.md](docs/mcp.zh-CN.md)**。如何调用这两个技能及示例，见
-**[docs/skills.zh-CN.md](docs/skills.zh-CN.md)**。
+全部工具、其他客户端（含 stdio）以及刻意未暴露的部分，见
+**[docs/mcp.zh-CN.md](docs/mcp.zh-CN.md)**。
+
+### 技能
+
+两个内置技能消费这些工具：
+
+- **`ai-usage-review`** —— 把数字变成有排序、有证据支撑的改进项
+- **`ai-change-impact`** —— 用美元衡量一次改动实际省下了多少
+
+如何调用及示例，见 **[docs/skills.zh-CN.md](docs/skills.zh-CN.md)**。
 
 ### Dashboard（仪表盘）
 
 KPI 卡片、按输入/输出/缓存拆分的 token 趋势，以及按模型、项目、MCP 服务器和 skill 的
-分项统计。每个图表都有独立的时间范围切换。
+分项统计。
 
 ![Dashboard charts](docs/screenshots/02-dashboard-charts.png)
 
 ### Runs（运行列表）
 
-列出每一次记录到的会话，含项目、智能体数量、回合数与 token 总量，支持搜索与过滤。
-每一行都带有该运行的 ID —— 把它交给 `ai-change-impact` 即可对比两次会话。
+列出每一次记录到的会话，支持搜索与过滤。每一行的运行 ID 就是交给
+`ai-change-impact` 对比两次会话时用的那个。
 
 ![Runs](docs/screenshots/03-runs.png)
 
@@ -154,13 +131,12 @@ KPI 卡片、按输入/输出/缓存拆分的 token 趋势，以及按模型、�
 
 ### 运行详情
 
-三栏回放：左侧智能体列表，中间是会话树，右侧是节点完整详情。按顺序呈现提示词、
-LLM 调用、工具与 MCP 调用、hook 触发、子智能体派生、上下文压缩与错误。
+单次会话的三栏回放：按顺序呈现提示词、LLM 调用、工具与 MCP 调用、hook 触发、
+子智能体派生、上下文压缩与错误。
 
 ![Run detail — session tree](docs/screenshots/04-run-detail-tree.png)
 
-第二个标签页是该次运行的成本拆解 —— 花费曲线、按模型的表格、基础 / MCP / skill /
-子智能体的环形图，以及基于本次运行真实数字算出的调优建议。
+第二个标签页拆解该次运行的成本，其中的调优建议算自本次运行的真实数字，而非通用规则。
 
 ![Run detail — usage](docs/screenshots/05-run-detail-usage.png)
 
@@ -169,8 +145,7 @@ LLM 调用、工具与 MCP 调用、hook 触发、子智能体派生、上下文
 查看 —— 在安全的前提下也可编辑 —— 当前工具的配置。每个标签页只在当前 provider
 支持该能力时出现。
 
-**CLAUDE.md** —— 该工具注入的每一个指令文件，含 token 统计、内嵌编辑器，以及按天的
-注入 token 时间线。
+**CLAUDE.md** —— 该工具注入的每一个指令文件，带内嵌编辑器。
 
 ![CLAUDE.md](docs/screenshots/06-claudemd.png)
 
@@ -179,13 +154,12 @@ LLM 调用、工具与 MCP 调用、hook 触发、子智能体派生、上下文
 
 ![Commands](docs/screenshots/07-commands.png)
 
-**Skills（技能）** —— token 成本、实际记录的调用次数、触发分析器，以及展示该 skill
-与哪些 hook、服务器和命令相连的**关联组件**图。
+**Skills（技能）** —— 成本、实际记录的调用次数、触发分析器，以及该 skill 与哪些
+hook、服务器和命令相连。
 
 ![Skills](docs/screenshots/08-skills.png)
 
-**Hooks** —— 所有配置层中的每个 hook，含 matcher 与**实际触发次数** —— 来自事件流
-记录，不是估算。
+**Hooks** —— 所有配置层中的每个 hook。触发次数来自事件流记录，不是估算。
 
 ![Hooks](docs/screenshots/09-hooks.png)
 
@@ -193,14 +167,13 @@ LLM 调用、工具与 MCP 调用、hook 触发、子智能体派生、上下文
 
 ![Hook script editor](docs/screenshots/10-hooks-script.png)
 
-**MCP** —— 作用域、传输方式、探测状态、注入量估算，以及可展开的工具及其 JSON schema。
+**MCP** —— 作用域、传输方式、探测状态、注入量估算，以及可展开的工具 schema。
 服务器只从配置文件读取，绝不执行 ——
 [原因](docs/architecture.zh-CN.md#mcp-为什么读配置文件而不用-cli)。
 
 ![MCP](docs/screenshots/11-mcp.png)
 
-**Permissions（权限）** —— 跨层的 `allow` / `deny` / `ask` 规则，合并为最终生效集合，
-被遮蔽的规则以删除线标出。
+**Permissions（权限）** —— 跨层规则合并为最终生效集合，被遮蔽的规则以删除线标出。
 
 ![Permissions](docs/screenshots/12-permissions.png)
 
@@ -209,22 +182,21 @@ LLM 调用、工具与 MCP 调用、hook 触发、子智能体派生、上下文
 
 ![Memory](docs/screenshots/13-memory.png)
 
-**Configs（生效配置）** —— 各设置层合并后的只读视图：每个键的最终生效值、它覆盖了
-哪些层，以及对写在该工具根本不读取的层中的键给出的告警。
+**Configs（生效配置）** —— 各设置层合并后的视图，并对写在该工具根本不读取的层中的
+键给出告警。
 
 ![Effective Configs](docs/screenshots/15-configs.png)
 
 ### Settings（设置）
 
-Harness 状态标记所用的告警阈值、[数据保留](#数据保留)，以及驱动应用内全部成本数字的
-分模型参考价格。
+Harness 状态标记所用的告警阈值、数据保留，以及驱动应用内全部成本数字的分模型参考价格。
 
 ![Settings](docs/screenshots/16-settings.png)
 
 ### 主题与数据源
 
-浅色与深色两套主题，选择会被保存且图表原地换肤；顶栏的 **Source ▾** 切换器列出所有
-已注册的 provider 并标注哪些有数据。
+主题选择会被保存，且图表原地换肤。**Source ▾** 列出所有已注册的 provider 并标注
+哪些有数据。
 
 ![Dark theme](docs/screenshots/17-dashboard-dark.png)
 
@@ -236,6 +208,8 @@ Harness 状态标记所用的告警阈值、[数据保留](#数据保留)，以�
 
 | 文档 | 内容 |
 |---|---|
+| [docs/cli.zh-CN.md](docs/cli.zh-CN.md) | 命令行参数、环境变量、脚本命令、独立可执行文件 |
+| [docs/storage.zh-CN.md](docs/storage.zh-CN.md) | 缓存、重建缓存，以及数据保留窗口 |
 | [docs/ui.zh-CN.md](docs/ui.zh-CN.md) | 每个界面及其控件，附截图 |
 | [docs/skills.zh-CN.md](docs/skills.zh-CN.md) | 两个技能：如何调用、示例，以及「复盘 → 落地 → 验证」闭环 |
 | [docs/mcp.zh-CN.md](docs/mcp.zh-CN.md) | MCP 服务器：安装、全部工具、其他客户端、未暴露的部分、安全 |
