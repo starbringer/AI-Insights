@@ -115,7 +115,7 @@ tools, whose answer cannot vary by source (`list_providers`, `get_pricing`,
 `get_thresholds`, `get_data_retention`), omit the argument.
 
 Every ranged tool takes **`range`** as `1h`, `24h` or N days (`7d`, `30d`, …). It
-defaults to, and is capped at, the [retention window](../README.md#data-retention)
+defaults to, and is capped at, the [retention window](storage.md#data-retention)
 — the app deletes records older than that (30 days by default), so no tool can
 look further back. `get_usage_summary` reports the window as `retentionDays`, and
 `get_data_retention` returns it on its own.

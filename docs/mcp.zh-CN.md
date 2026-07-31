@@ -105,7 +105,7 @@ bun run mcp        # = bun run mcp-stdio.ts
 `get_data_retention`）不带该参数。
 
 所有带范围的工具都接受 **`range`**：`1h`、`24h` 或 N 天（`7d`、`30d` 等）。它默认取
-[数据保留窗口](../README.zh-CN.md#数据保留)，并被其截断 —— 应用会删除更早的记录（默认
+[数据保留窗口](storage.zh-CN.md#数据保留)，并被其截断 —— 应用会删除更早的记录（默认
 保留 30 天），因此任何工具都无法看得更远。`get_usage_summary` 会以 `retentionDays` 返回
 该窗口，`get_data_retention` 则单独返回它。
 

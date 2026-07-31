@@ -19,7 +19,7 @@ conversation and configuration name replaced by consistent stand-ins — see
 ![Dashboard charts](screenshots/02-dashboard-charts.png)
 
 Every chart has its own range switcher — `1h` / `24h` / `7d` / `30d` — and remembers
-your choice. The ladder follows the [retention window](../README.md#data-retention) —
+your choice. The ladder follows the [retention window](storage.md#data-retention) —
 a 14-day window offers `1h` / `24h` / `7d` / `14d`. Costs are API-equivalent
 reference numbers from an editable pricing table, not billing;
 [details](data-model.md#cost-estimation).
@@ -165,7 +165,7 @@ overrides, and warnings for keys set in a layer the tool never reads.
 ## Settings
 
 Warning thresholds behind the ok/warn/error badges on the Harness tabs,
-[data retention](../README.md#data-retention), and the per-model reference pricing
+[data retention](storage.md#data-retention), and the per-model reference pricing
 that drives every cost number in the app.
 
 ![Settings](screenshots/16-settings.png)

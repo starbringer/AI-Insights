@@ -18,7 +18,7 @@
 ![Dashboard charts](screenshots/02-dashboard-charts.png)
 
 每个图表都有独立的时间范围切换（`1h` / `24h` / `7d` / `30d`），并记住你的选择。梯度跟随
-[保留窗口](../README.zh-CN.md#数据保留) —— 14 天窗口给出 `1h` / `24h` / `7d` / `14d`。
+[保留窗口](storage.zh-CN.md#数据保留) —— 14 天窗口给出 `1h` / `24h` / `7d` / `14d`。
 成本是基于可编辑价格表算出的 API 等价参考值，不是账单；
 [详见此处](data-model.zh-CN.md#成本估算)。
 
@@ -147,7 +147,7 @@ skill 一致的**关联组件**区域 —— 不含任何 skill 的集群（hook
 ## Settings（设置）
 
 Harness 标签页上 ok/warn/error 状态标记所用的告警阈值、
-[数据保留](../README.zh-CN.md#数据保留)，以及驱动应用内全部成本数字的分模型参考价格。
+[数据保留](storage.zh-CN.md#数据保留)，以及驱动应用内全部成本数字的分模型参考价格。
 
 ![Settings](screenshots/16-settings.png)
 

@@ -218,7 +218,7 @@ worth knowing before you make ten more edits on the same theory.
 ### Mind the retention window
 
 Every recorded count — skill calls, hook fires, injected tokens, comparison
-windows — spans the [retention window](../README.md#data-retention), 30 days by
+windows — spans the [retention window](storage.md#data-retention), 30 days by
 default, not a fixed month. The "before" side of a comparison has to still be
 inside it. If you plan to measure a change, make it early in the window rather
 than late, and do not widen the window expecting deleted history back — widening
