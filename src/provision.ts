@@ -9,9 +9,9 @@ import { SERVER_NAME } from "./mcp/protocol";
 // Startup provisioning — provider-agnostic.
 //
 // On every start the app makes itself usable from whichever AI coding tools are
-// installed on this machine: it copies the bundled usage-review skill into each
-// tool's user-scope skill directory and registers the local MCP endpoint with
-// it. Both steps are idempotent, so this is a no-op from the second run on.
+// installed on this machine: it copies the bundled skills into each tool's
+// user-scope skill directory and registers the local MCP endpoint with it. Both
+// steps are idempotent, so this is a no-op from the second run on.
 //
 // Nothing here knows about Claude Code. It loops the config-adapter registry and
 // calls whatever provisioning hooks each adapter implements; a future Codex or
@@ -21,7 +21,8 @@ import { SERVER_NAME } from "./mcp/protocol";
 export interface ProvisionReport {
   providerId: string;
   displayName: string;
-  skill?: ProvisionResult;
+  /** One entry per bundled skill, so no install goes unreported. */
+  skills?: ProvisionResult[];
   mcp?: ProvisionResult;
 }
 
@@ -52,8 +53,15 @@ export function loadSkillPackage(name: string): SkillPackage | null {
   return { name, files };
 }
 
-/** Skills this app ships and keeps installed in every detected tool. */
-export const BUNDLED_SKILLS = ["ai-usage-review"];
+/**
+ * Skills this app ships and keeps installed in every detected tool.
+ *
+ * Two, deliberately: reviewing usage and measuring a change are different
+ * questions with disjoint trigger phrases, and one skill answering both would
+ * trigger for neither reliably. They cross-reference each other so a review's
+ * recommendation can be verified after it is applied.
+ */
+export const BUNDLED_SKILLS = ["ai-usage-review", "ai-change-impact"];
 
 export interface ProvisionOptions {
   /** URL of this app's MCP endpoint, e.g. http://127.0.0.1:5757/mcp */
@@ -77,38 +85,28 @@ export async function provision(opts: ProvisionOptions): Promise<ProvisionReport
     const report: ProvisionReport = { providerId: adapter.providerId, displayName };
 
     if (!opts.skipSkills && adapter.installSkill) {
-      for (const pkg of packages) {
-        const result = adapter.installSkill(pkg);
-        // Multiple packages collapse into the most interesting outcome so the
-        // startup log stays one line per tool.
-        report.skill = mergeResults(report.skill, result);
-      }
+      // Reported per skill rather than collapsed: a line saying one skill was
+      // updated while a second was silently installed is worse than two lines.
+      // Unchanged results are dropped at format time, so a settled install stays
+      // quiet either way.
+      report.skills = packages.map(pkg => adapter.installSkill!(pkg));
     }
 
     if (!opts.skipMcp && adapter.registerMcpServer) {
       report.mcp = await adapter.registerMcpServer({ name: SERVER_NAME, url: opts.mcpUrl });
     }
 
-    if (report.skill || report.mcp) reports.push(report);
+    if (report.skills?.length || report.mcp) reports.push(report);
   }
 
   return reports;
-}
-
-const SEVERITY: Record<ProvisionResult["status"], number> = {
-  failed: 4, installed: 3, updated: 3, skipped: 2, unchanged: 1,
-};
-
-function mergeResults(a: ProvisionResult | undefined, b: ProvisionResult): ProvisionResult {
-  if (!a) return b;
-  return SEVERITY[b.status] > SEVERITY[a.status] ? b : a;
 }
 
 /** One log line per outcome; quiet when everything was already in place. */
 export function formatProvisionReport(reports: ProvisionReport[]): string[] {
   const lines: string[] = [];
   for (const r of reports) {
-    for (const result of [r.skill, r.mcp]) {
+    for (const result of [...(r.skills ?? []), r.mcp]) {
       if (!result) continue;
       if (result.status === "unchanged") continue;
       lines.push(`[provision] ${r.displayName}: ${result.detail}`);

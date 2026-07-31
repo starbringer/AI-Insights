@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DB_PATH } from "./paths";
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 let _db: Database | null = null;
 
@@ -27,6 +27,7 @@ export function getDb(): Database {
     _db.run("DROP TABLE IF EXISTS agents");
     _db.run("DROP TABLE IF EXISTS runs");
     _db.run("DROP TABLE IF EXISTS events");
+    _db.run("DROP TABLE IF EXISTS harness_snapshots");
   }
 
   initSchema(_db);
@@ -49,6 +50,7 @@ function initSchema(db: Database): void {
   db.run(`CREATE TABLE IF NOT EXISTS runs (
     run_id           TEXT PRIMARY KEY,
     provider         TEXT NOT NULL,
+    run_key          TEXT,
     project_flat     TEXT,
     cwd              TEXT,
     title            TEXT,
@@ -60,6 +62,12 @@ function initSchema(db: Database): void {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_runs_last_seen ON runs(last_seen_at)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_runs_cwd       ON runs(cwd)`);
+  // `run_key` is the short public id users quote back to the comparison tools,
+  // derived from (provider, run_id) so it survives this cache being rebuilt —
+  // see transcripts/runKey.ts. Deliberately NOT unique: a hash collision must
+  // surface as an "ambiguous id" at lookup time, never as a constraint
+  // violation that breaks ingest.
+  db.run(`CREATE INDEX IF NOT EXISTS idx_runs_key       ON runs(run_key)`);
 
   db.run(`CREATE TABLE IF NOT EXISTS agents (
     agent_id          TEXT PRIMARY KEY,
@@ -139,4 +147,19 @@ function initSchema(db: Database): void {
   db.run(`CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, ts)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_events_tool_use ON events(agent_id, tool_use_id)`);
+
+  // Append-only log of what the harness looked like, so a before/after
+  // comparison can name what changed. Harness config is read live from disk,
+  // which means a past run's CLAUDE.md is otherwise unrecoverable once edited.
+  // Rows hold hashes and token counts only — never file contents — and are
+  // written only when the fingerprint actually changes, so the table stays tiny.
+  db.run(`CREATE TABLE IF NOT EXISTS harness_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider     TEXT NOT NULL,
+    project      TEXT,            -- cwd the snapshot applies to; NULL = user scope
+    captured_at  TEXT NOT NULL,
+    fingerprint  TEXT NOT NULL,   -- hash of payload; gates whether a row is written
+    payload      TEXT NOT NULL    -- JSON: {type,id,scope,tokens,hash}[] per component
+  )`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON harness_snapshots(provider, project, captured_at)`);
 }

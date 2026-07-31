@@ -692,7 +692,7 @@ function renderRunsTable(rows, total) {
   const table = document.createElement('table');
   table.innerHTML = `
     <thead><tr>
-      <th></th><th>Title</th><th>Project</th>
+      <th></th><th>Title</th><th>Project</th><th>ID</th>
       <th class="td-num">Agents</th><th class="td-num">Turns</th>
       <th class="td-num">Total tokens</th>
       <th class="td-num">Input</th><th class="td-num">Cache read</th>
@@ -708,6 +708,9 @@ function renderRunsTable(rows, total) {
       <td style="padding:0 6px 0 0"><button class="btn-sm btn-view" data-rid="${esc(r.run_id)}" data-title="${esc(title)}" data-cwd="${esc(cwd)}">View</button></td>
       <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(title)}">${agentBadge}${esc(title)}</td>
       <td class="td-dim" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(cwd)}">${esc(cwd.split(/[/\\]/).pop() || '—')}</td>
+      <td>${r.run_key
+        ? `<button class="run-key" data-key="${esc(r.run_key)}" title="Copy this run's id — pass it to compare_runs to measure a change">${esc(r.run_key)}</button>`
+        : '<span class="td-dim">—</span>'}</td>
       <td class="td-num">${r.agent_count ?? 1}</td>
       <td class="td-num">${r.turn_count ?? 0}</td>
       <td class="td-num">${fmt.tokens(r.total)}</td>
@@ -723,7 +726,45 @@ function renderRunsTable(rows, total) {
       openRunDetail(btn.dataset.rid, btn.dataset.title, btn.dataset.cwd);
     });
   });
+  table.querySelectorAll('.run-key').forEach(btn => {
+    btn.addEventListener('click', () => copyRunKey(btn));
+  });
   document.getElementById('runs-table-wrap').replaceChildren(table);
+}
+
+/**
+ * Copy a run id, confirming in the button itself.
+ *
+ * navigator.clipboard needs a secure context, which localhost is — but the
+ * server can be bound to 0.0.0.0 and reached over plain http on a LAN address,
+ * where it is undefined. The textarea fallback keeps the button working there,
+ * and if even that fails the text is left selected so it can be copied by hand.
+ */
+async function copyRunKey(btn) {
+  const key = btn.dataset.key;
+  const done = ok => {
+    const original = btn.textContent;
+    btn.textContent = ok ? 'copied ✓' : 'press Ctrl+C';
+    btn.classList.toggle('copied', ok);
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1200);
+  };
+
+  try {
+    await navigator.clipboard.writeText(key);
+    done(true);
+    return;
+  } catch { /* fall through */ }
+
+  const ta = document.createElement('textarea');
+  ta.value = key;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  done(ok);
 }
 
 // ===== Settings =====

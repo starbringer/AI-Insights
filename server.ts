@@ -7,6 +7,7 @@ import { getDb } from "./src/db";
 import { PROVIDERS } from "./src/providers";
 import { startWatcher } from "./src/watcher";
 import { getRetentionDays, startRetentionSweeper } from "./src/retention";
+import { startHarnessCapture } from "./src/config/snapshots";
 import { settingsRouter } from "./src/api/settingsEndpoints";
 import { transcriptRouter } from "./src/api/transcriptEndpoints";
 import { providersRouter } from "./src/api/providersEndpoint";
@@ -38,6 +39,11 @@ console.log("[startup] done scanning");
 // moves past local midnight on a long-running server.
 console.log(`[startup] data retention: ${getRetentionDays()} days`);
 startRetentionSweeper(db);
+
+// Fingerprint the harness now and periodically. Config is read live from disk,
+// so without this log a past run's CLAUDE.md is unrecoverable the moment it is
+// edited — and a before/after comparison could never say what changed.
+startHarnessCapture(db, PROVIDERS.map(p => p.id));
 
 if (!STATIC_ONLY) startWatcher(db);
 

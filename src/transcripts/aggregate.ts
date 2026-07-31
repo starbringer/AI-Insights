@@ -321,6 +321,18 @@ export interface McpUsageStat {
   tools: { tool: string; calls: number; tokens: number }[];
 }
 
+/**
+ * Split a recorded tool name of the form "mcp__<server>__<tool>" into its parts.
+ * Shared with the comparison tools so both attribute calls to the same server.
+ */
+export function splitMcpToolName(detail: string): { server: string; tool: string } {
+  const rest = detail.slice(5);
+  const sep = rest.indexOf("__");
+  return sep === -1
+    ? { server: rest, tool: "(unknown)" }
+    : { server: rest.slice(0, sep), tool: rest.slice(sep + 2) };
+}
+
 export function getMcpUsage(db: Database, since: string, provider?: ProviderFilter): McpUsageStat[] {
   const params: BindParams = [since];
   const provAnd = providerAnd(provider, params);
@@ -333,11 +345,7 @@ export function getMcpUsage(db: Database, since: string, provider?: ProviderFilt
 
   const byServer = new Map<string, McpUsageStat>();
   for (const r of rows) {
-    // detail = "mcp__<server>__<tool>"
-    const rest = r.detail.slice(5);
-    const sep = rest.indexOf("__");
-    const server = sep === -1 ? rest : rest.slice(0, sep);
-    const tool = sep === -1 ? "(unknown)" : rest.slice(sep + 2);
+    const { server, tool } = splitMcpToolName(r.detail);
     const entry = byServer.get(server) ?? { server, calls: 0, tokens: 0, tools: [] };
     entry.calls += r.calls;
     entry.tokens += r.tokens ?? 0;

@@ -1,12 +1,12 @@
-# MCP 服务器与用量复盘技能
+# MCP 服务器
 
 [English](mcp.md) | **简体中文**
 
 仪表盘回答的是你想得到要问的问题。MCP 服务器让 AI 助手替你去问：它把同一份数据 ——
-token、成本、会话，以及整个 harness 配置 —— 暴露为可调用的工具；内置的
-`ai-usage-review` 技能再把这些数据变成有排序、有证据支撑的优化建议。
+token、成本、会话，以及整个 harness 配置 —— 暴露为可调用的工具。消费它的正是两个内置
+技能 —— 见 **[skills.zh-CN.md](skills.zh-CN.md)**。
 
-两者都随应用一起启动。没有第二个进程要开，也不需要 Docker。
+这些都随应用一起启动。没有第二个进程要开，也不需要 Docker。
 
 ---
 
@@ -20,8 +20,8 @@ bun run start
 
 1. 在与仪表盘相同的端口上提供 MCP 端点 **`http://127.0.0.1:5757/mcp`**
    （streamable HTTP 传输）；
-2. 把 `ai-usage-review` 技能安装到检测到的每个 AI 工具的用户级技能目录
-   （Claude Code 为 `~/.claude/skills/ai-usage-review/`）；
+2. 把 `ai-usage-review` 与 `ai-change-impact` 技能安装到检测到的每个 AI 工具的
+   用户级技能目录（Claude Code 为 `~/.claude/skills/`）；
 3. 通过各工具自己的 CLI 注册该端点 ——
    `claude mcp add --scope user --transport http ai-insights http://127.0.0.1:5757/mcp`。
 
@@ -119,7 +119,7 @@ bun run mcp        # = bun run mcp-stdio.ts
 | `get_daily_usage` | 逐日总量，默认取保留窗口并以其为上限 |
 | `get_model_usage` | 按模型的总量 |
 | `get_project_usage` | 按项目目录的总量、运行数与智能体数 |
-| `list_runs` | 分页会话列表（`limit`、`offset`、`project`、`search`） |
+| `list_runs` | 分页会话列表（`limit`、`offset`、`project`、`search`），每行带有 `run_key` |
 | `get_run` | 单次运行及其全部智能体 |
 | `get_run_usage` | 单次运行按分类桶与模型的成本拆解，**外加已渲染成文字的调优建议** |
 | `get_top_runs` | 按 token 排序的会话 |
@@ -127,6 +127,28 @@ bun run mcp        # = bun run mcp-stdio.ts
 | `get_mcp_usage` | 每个 MCP 服务器的估算 token，含按工具拆分 |
 | `get_skill_usage` | 已记录的技能调用及其注入 token |
 | `list_agents` | 智能体及其模型、回合数与 token 总量 |
+
+### 改进效果
+
+| 工具 | 返回 |
+|---|---|
+| `compare_runs` | 两次会话并排对比：成本差额、三因子归因、各自调用过的技能 / MCP 服务器 / 工具、两者之间的 harness 差异，以及注意事项 |
+| `compare_periods` | 两个时间窗并排对比：总量、按模型与按分类桶拆解、归一化速率（每次运行、每次 API 调用的成本，每次调用的 token）、同样的归因、harness 差异、注意事项 |
+| `get_harness_changes` | harness 配置何时发生变化、变了什么，并给出 token 增减 |
+
+运行通过 `run_key` 寻址 —— 这是一个由 `(provider, 原生 run id)` **推导**而非分配得到的
+短 ID（`r-9f3a1c2b7e04`），因此缓存重建后依然有效，且对所有数据源形态一致。任意四位
+及以上的唯一前缀均可解析，原生 run id 也可以。`get_run` 与 `get_run_usage` 同样接受它。
+
+两个对比工具都把成本差额拆成三项**精确相加**的因子 —— `volume`（发起的 API 调用次数）、
+`tokens-per-turn`（每次调用携带的上下文）与 `price-per-token`（模型与缓存的组合）。
+其中没有任何建模成分，因此任一项都可作为真实数字引用。第三项背后的模型占比与缓存命中率
+放在 `priceEvidence` 中；不再进一步拆分，因为模型选择与缓存行为相互纠缠。
+
+时间窗为左闭右开 `[from, until)`，因此相邻时间段可以无缝衔接而不会重复计数。每个边界
+接受 ISO 时间戳、日期（`2026-07-15`，覆盖当地一整天）或表示「之前」的相对偏移
+（`7d`、`24h`）。结束时间早于保留截止点的窗口会**报错，而不是返回空结果** —— 那部分
+数据已被删除，返回 0 会被读成「你那时候没花钱」。
 
 ### Harness 配置
 
@@ -163,6 +185,8 @@ bun run mcp        # = bun run mcp-stdio.ts
 | `list_skills`、`list_commands` | `includeContent` | `false` —— 省略正文 |
 | `list_mcp_servers` | `includeSchemas` | `false` —— 省略 JSON schema |
 | `get_run_usage` | `includeSeries` | `false` —— 逐次调用序列替换为其长度 |
+| `get_run_usage` | `includeComponents` | `false` —— 省略调用过的技能 / MCP 服务器 / 工具 |
+| `compare_runs` | `includeComponents` | `true` —— 设为 `false` 可得到精简结果 |
 
 文件内容在 20,000 字符处截断并显式标注。一个用来诊断上下文膨胀的工具，不该自己制造膨胀。
 
@@ -200,54 +224,8 @@ diff 呈现，也可以被拒绝。这正是重点：复盘负责建议，人负
 
 ---
 
-## `ai-usage-review` 技能
+## 内置技能
 
-安装到 `~/.claude/skills/ai-usage-review/`（以及其他检测到的工具的对应目录）。源文件位于
-[`assets/skills/ai-usage-review/`](../assets/skills/ai-usage-review/) —— 在那里编辑并重启
-应用即可推送更新。
-
-用 `/ai-usage-review` 调用，或者直接问：*“复盘一下我的 Claude Code 用量”*、
-*“为什么我的会话这么贵？”*、*“这个该做成 skill 还是 hook？”*
-
-### 它做什么
-
-1. 先确定要看哪个 provider（`list_providers`），再为之后每次调用指定作用域。
-2. 按固定顺序采集 —— 支出形态 → 浪费信号 → 单会话细节 → 常驻上下文 → 扩展项 ROI →
-   确定性缺口 → 正确性 —— 一旦结论有了支撑就停止采集。
-3. 执行 `references/playbook.md` 中的 11 项检查，每项都有测量值、阈值、修复方案，以及
-   一条“如何用真实数字估算节省”的规则。
-4. 输出至多 7 条按预估节省排序的发现，每条都注明数据来自哪次工具调用，并以“先做这件事”
-   收尾。
-5. 主动提出用你助手自己的编辑工具落地其中机械性的改动。
-
-### 检查清单
-
-| # | 检查 | 触发条件 |
-|---|---|---|
-| C1 | 指令文件对每个回合征税 | 单文件超过约 2,000 token，或窗口内注入超过 200 万 token |
-| C2 | 高价模型在做常规工作 | 高价档占 token 超过 50% |
-| C3 | 提示缓存没命中 | 整个窗口低于 50%；单次运行低于 30% |
-| C4 | 会话携带过多上下文 | 单次调用超过 20 万 token，或单次运行占该周期 20% 以上 |
-| C5 | 不划算的技能 | 窗口内零调用、被同名高优先级定义遮蔽，或正文很大而使用很少 |
-| C6 | MCP 服务器入不敷出 | schema 超过 2,000 token 且零调用；探测报错 |
-| C7 | 该做成 hook 的规则；已死的 hook | 散文里的“总是/绝不”规则；零触发的 hook |
-| C8 | 应该沉淀为技能的重复劳动 | 同一形态任务在窗口内出现 3 次以上 |
-| C9 | 子智能体开销过重的运行 | 子智能体占单次运行 token 超过 60% |
-| C10 | 权限白名单过窄 | 日常高频命令不在 `allow` 中 |
-| C11 | 形同虚设的设置 | 键落在不被读取的层、被遮蔽的命令/技能、孤儿记忆文件 |
-
-技能里还有一张“症状索引”，把用户的抱怨（“老是上下文不够”、“老是问我要权限”、
-“它不听我的规则”）映射到能解释该症状的检查项。
-
-### 文件
-
-```
-assets/skills/ai-usage-review/
-  SKILL.md                 工作流：定范围 → 采集 → 诊断 → 报告 → 落地
-  references/
-    playbook.md            11 项检查：信号、阈值、修复、如何估算节省
-    authoring.md           如何构建修复方案：skill / hook / 子智能体 / CLAUDE.md 怎么选
-```
-
-`SKILL.md` 刻意保持简短 —— 技能正文一旦加载，就会在该回合剩余部分一直留在上下文里。
-两份 reference 仅在需要时才读取。
+有两个技能消费这个服务器：**`ai-usage-review`** 找出花钱的地方，
+**`ai-change-impact`** 验证修复是否奏效。两者都在启动时安装，且都不写入。
+如何调用、示例，以及「复盘 → 落地 → 验证」闭环：**[skills.zh-CN.md](skills.zh-CN.md)**。

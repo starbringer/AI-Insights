@@ -1,14 +1,13 @@
-# MCP server and the usage-review skill
+# MCP server
 
 **English** | [简体中文](mcp.zh-CN.md)
 
 The dashboard answers questions you know to ask. The MCP server lets an AI
 assistant ask them for you: it exposes the same data — tokens, costs, sessions,
-and the whole harness configuration — as callable tools, and the bundled
-`ai-usage-review` skill turns that data into ranked, evidence-backed
-recommendations.
+and the whole harness configuration — as callable tools. The two bundled skills
+are what consume it — see **[skills.md](skills.md)**.
 
-Both come up with the app. There is no second process to start and no Docker.
+All of it comes up with the app. There is no second process to start and no Docker.
 
 ---
 
@@ -22,8 +21,9 @@ That is the whole setup. On startup the app:
 
 1. serves the MCP endpoint at **`http://127.0.0.1:5757/mcp`** on the same port as
    the dashboard (streamable HTTP transport);
-2. installs the `ai-usage-review` skill into every detected AI tool's user-scope
-   skills directory (`~/.claude/skills/ai-usage-review/` for Claude Code);
+2. installs the `ai-usage-review` and `ai-change-impact` skills into every
+   detected AI tool's user-scope skills directory (`~/.claude/skills/` for
+   Claude Code);
 3. registers the endpoint with each detected tool by running its own CLI —
    `claude mcp add --scope user --transport http ai-insights http://127.0.0.1:5757/mcp`.
 
@@ -130,7 +130,7 @@ look further back. `get_usage_summary` reports the window as `retentionDays`, an
 | `get_daily_usage` | Day-by-day totals, defaulting to and capped at the retention window |
 | `get_model_usage` | Totals per model |
 | `get_project_usage` | Totals, run and agent counts per project directory |
-| `list_runs` | Paginated session list (`limit`, `offset`, `project`, `search`) |
+| `list_runs` | Paginated session list (`limit`, `offset`, `project`, `search`), each row carrying its `run_key` |
 | `get_run` | One run with all its agents |
 | `get_run_usage` | Per-run cost breakdown by bucket and model, **plus rendered tuning advice** |
 | `get_top_runs` | Sessions ranked by tokens |
@@ -138,6 +138,33 @@ look further back. `get_usage_summary` reports the window as `retentionDays`, an
 | `get_mcp_usage` | Estimated tokens per MCP server, with a per-tool breakdown |
 | `get_skill_usage` | Recorded skill invocations and their injected tokens |
 | `list_agents` | Agents with model, turn count and token totals |
+
+### Change impact
+
+| Tool | Returns |
+|---|---|
+| `compare_runs` | Two sessions side by side: cost delta, the three-factor attribution, each run's invoked skills / MCP servers / tools, the harness diff between them, and caveats |
+| `compare_periods` | Two windows side by side: totals, per-model and per-bucket splits, normalized rates (cost per run, per API call, tokens per call), the same attribution, harness diff, caveats |
+| `get_harness_changes` | When the harness configuration changed and what changed, with token deltas |
+
+Runs are addressed by `run_key` — a short id (`r-9f3a1c2b7e04`) derived from
+`(provider, native run id)` rather than assigned, so it survives the cache being
+rebuilt and is the same shape for every provider. Any unique prefix of four or
+more characters resolves, as does a native run id. `get_run` and `get_run_usage`
+accept one too.
+
+Both comparison tools split the cost delta into three terms that **sum exactly**
+to it — `volume` (API calls made), `tokens-per-turn` (context per call) and
+`price-per-token` (the model and cache blend). Nothing is modelled, so any single
+term is quotable as a real figure. `priceEvidence` carries the model shares and
+cache rates behind the third term; it is not split further because model choice
+and cache behaviour are entangled.
+
+Windows are half-open `[from, until)`, so adjacent periods tile without double
+counting. Each bound accepts an ISO timestamp, a date (`2026-07-15`, covering the
+whole local day) or a relative offset meaning "ago" (`7d`, `24h`). A window that
+ends before the retention cutoff is an **error, not an empty result** — that data
+was deleted, and reporting zero would read as "you spent nothing then".
 
 ### Harness configuration
 
@@ -174,6 +201,8 @@ Tools that could return whole files return metadata only by default:
 | `list_skills`, `list_commands` | `includeContent` | `false` — bodies omitted |
 | `list_mcp_servers` | `includeSchemas` | `false` — JSON schemas omitted |
 | `get_run_usage` | `includeSeries` | `false` — per-call series replaced by its length |
+| `get_run_usage` | `includeComponents` | `false` — invoked skills / MCP servers / tools omitted |
+| `compare_runs` | `includeComponents` | `true` — set `false` for a compact answer |
 
 File contents are truncated at 20,000 characters with an explicit marker. A
 tool built to diagnose context bloat should not cause it.
@@ -216,56 +245,9 @@ negotiated at `initialize`.
 
 ---
 
-## The `ai-usage-review` skill
+## The bundled skills
 
-Installed to `~/.claude/skills/ai-usage-review/` (and the equivalent directory of
-any other detected tool). Source of truth lives in
-[`assets/skills/ai-usage-review/`](../assets/skills/ai-usage-review/) — edit it
-there and restart the app to push the update.
-
-Invoke it with `/ai-usage-review`, or just ask: *"review my Claude Code usage"*,
-*"why are my sessions so expensive?"*, *"should this be a skill or a hook?"*
-
-### What it does
-
-1. Resolves which provider to look at (`list_providers`), then scopes every call.
-2. Gathers in a fixed order — shape of spend → waste signals → per-session detail
-   → always-on context → extension ROI → determinism gaps → correctness — and
-   stops as soon as the findings are supported.
-3. Runs eleven checks from `references/playbook.md`, each with a measurement, a
-   threshold, a fix, and a rule for sizing the saving from real numbers.
-4. Reports at most seven findings ranked by estimated saving, each citing the
-   tool call it came from, and closes with a "do this first".
-5. Offers to apply the mechanical ones with your assistant's own edit tools.
-
-### The checks
-
-| # | Check | Fires on |
-|---|---|---|
-| C1 | Instruction files taxing every turn | A file over ~2,000 tokens, or >2M injected tokens over the window |
-| C2 | Premium models doing routine work | Premium tier over 50% of tokens |
-| C3 | Prompt cache not being hit | Under 50% over the window; under 30% on a run |
-| C4 | Sessions carrying too much context | A single call over 200k tokens, or one run over 20% of the period |
-| C5 | Skills that don't pay for themselves | Zero calls in the window, shadowed by an override, or large body / low use |
-| C6 | MCP servers costing more than they return | >2,000 schema tokens with zero calls; probe errors |
-| C7 | Rules that should be hooks; hooks that are dead | "Always"/"never" rules in prose; hooks with zero fires |
-| C8 | Repeated work that should be a skill | The same task shape 3+ times inside the window |
-| C9 | Sub-agent-heavy runs | Sub-agents over 60% of a run's tokens |
-| C10 | Permission allowlist too thin | Daily-driver commands missing from `allow` |
-| C11 | Settings that do nothing | Keys in ignored layers, shadowed commands/skills, orphaned memory |
-
-A symptom index maps user complaints ("I keep running out of context", "it keeps
-asking permission", "it ignores my rules") to the checks that explain them.
-
-### Files
-
-```
-assets/skills/ai-usage-review/
-  SKILL.md                 The workflow: scope → gather → diagnose → report → apply
-  references/
-    playbook.md            The 11 checks: signal, threshold, fix, how to size the saving
-    authoring.md           How to build the fix: skill vs hook vs sub-agent vs CLAUDE.md
-```
-
-`SKILL.md` stays short on purpose — a skill's body sits in context for the rest
-of the turn once loaded. The two references are read only when needed.
+Two skills consume this server: **`ai-usage-review`** finds what is costing you,
+**`ai-change-impact`** proves whether the fix worked. Both are installed on
+startup and neither writes. How to invoke them, worked examples and the
+review→apply→measure loop: **[skills.md](skills.md)**.

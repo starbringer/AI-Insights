@@ -176,6 +176,25 @@ export interface McpReport {
   diagnostics: string[];      // enumeration/probe failures, never swallowed
 }
 
+/**
+ * MCP servers as *configured*, without probing them.
+ *
+ * Probing spawns every stdio server and hits every HTTP one, so it must not
+ * happen on a hot path. The harness snapshot log needs to know which servers
+ * exist and how they are defined, not what tools they expose — and its result
+ * has to be identical from every process, which a per-process probe cache can
+ * never guarantee.
+ */
+export interface McpServerDefInfo {
+  name: string;
+  scope: McpServerInfo["scope"];
+  /** Undefined when the definition is not readable locally (e.g. claude.ai). */
+  type?: McpServerInfo["type"];
+  command?: string;
+  source: string;
+  project?: string;
+}
+
 // ---- Memory -------------------------------------------------------------------
 
 export interface MemoryTopicInfo {
@@ -333,6 +352,8 @@ export interface ToolConfigAdapter {
 
   /** `agents` counts distinct agents over the retention window (`windowDays`). */
   mcpReport?(db: Database, forceRefresh?: boolean): Promise<McpReport & { agents: number; windowDays: number }>;
+  /** Configured MCP servers without probing. Cheap and process-independent. */
+  mcpServerDefs?(): McpServerDefInfo[];
 
   listMemoryStores?(db: Database): MemoryStoreInfo[];
 

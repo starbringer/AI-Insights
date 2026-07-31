@@ -53,16 +53,17 @@ in the UI (MCP/skill token usage, injected prompt cost) is a tokenizer estimate.
 
 ## Database
 
-SQLite at `data/cache.db` in WAL mode. Five tables, each carrying a `provider`
+SQLite at `data/cache.db` in WAL mode. Six tables, each carrying a `provider`
 column for multi-source support.
 
 | Table | Row = | Notes |
 |---|---|---|
 | **`files`** | one transcript file | path + byte offset, for incremental parsing |
-| **`runs`** | one logical run | derived roll-up: title, cwd, agent count, turn count, first/last seen. Rebuilt after every full scan **and** every incremental ingest (debounced), so the Runs page stays live without a restart |
+| **`runs`** | one logical run | derived roll-up: title, cwd, agent count, turn count, first/last seen, plus `run_key` (below). Rebuilt after every full scan **and** every incremental ingest (debounced), so the Runs page stays live without a restart |
 | **`agents`** | one transcript file | `run_id`, `parent_agent_id`, `parent_turn_index` (sibling ordering), `agent_type`, `description` (from sub-agent `meta.json`), title, cwd, last seen, turn count |
 | **`turns`** | one API call | **unique on (agent_id, message_id)** — this index is what deduplicates the one-line-per-content-block format. Carries model, token counts, timestamp, and a `bucket` column (0 = base, 1 = MCP, 2 = skill, assigned at parse time from the call's `tool_use` blocks; sub-agent attribution uses `is_subagent`) |
 | **`events`** | one parsed event | idempotent on (agent_id, source uuid): user prompts, tool calls (with tool name and `tool_use_id`), hook fires, API errors, compactions, model fallbacks. Tool events also carry an estimated token size and, for Skill calls, the skill name |
+| **`harness_snapshots`** | one harness fingerprint | append-only, written only when the fingerprint changes. Component hashes and token counts — never file contents — for instruction files, skills, commands, hooks, MCP servers, permissions and settings layers |
 
 `turns` is the source of truth for token totals, turn counts and last-seen times —
 all recomputed from it, never trusted from a maintained counter. (Incremental
@@ -73,6 +74,39 @@ would otherwise zero out turn counts or null out `last_seen_at`.)
 the app starts and finds a different version it drops and recreates everything,
 then re-parses every transcript. Deleting `data/cache.db` forces the same rebuild.
 A rebuild is safe at any time: the JSONL transcripts are the only source of truth.
+
+## Run keys
+
+`runs.run_key` is the short public id (`r-9f3a1c2b7e04`) users quote to the
+comparison tools. It is the first 48 bits of `sha256(JSON.stringify([provider,
+run_id]))` — **derived, never assigned**, because the rebuild above would give an
+autoincrement id or a generated UUID a different value and silently point it at
+another session. Including the provider keeps ids unique across sources, since a
+session id is only unique within one tool.
+
+Computed in `refreshRuns`, which every provider already calls, so a new adapter
+gets keys with no extra code. The index is deliberately **not** unique: a hash
+collision must surface as an "ambiguous id" at lookup time rather than as a
+constraint violation that breaks ingest.
+
+## Harness snapshots
+
+Harness configuration is read live from disk everywhere else, which means a run's
+CLAUDE.md is unrecoverable once edited — so a before/after comparison could show
+that cost fell but never say *because what*. `harness_snapshots` is the fix: a
+fingerprint captured at startup, after every config write through the app, and
+every 15 minutes. That interval is the resolution of the change timeline; an edit
+is dated to the next capture after it.
+
+Only hashes and token counts are stored, so the log reveals nothing the app does
+not already display. MCP servers are recorded from their **definitions only** — a
+probe spawns every configured server and its cache is per-process, so a
+probe-based fingerprint would be both expensive and unstable across processes.
+The token cost of MCP is already measured from the event stream instead.
+
+Snapshots age out with everything else, with one exception: the newest row
+predating the cutoff is kept, because it is the baseline the oldest retained
+period is diffed against.
 
 ## Retention
 
@@ -104,6 +138,9 @@ priced with a per-model table (input / output / cache-write / cache-read per
 million tokens) that you can edit on the **Settings** page or directly in
 `data/pricing.json`. Cache writes are priced 1.25× input for the 5-minute TTL and
 2× for the 1-hour TTL; cache reads 0.1× input.
+
+A model id the table does not list falls back to its family's standard rate, so a
+new release is still estimated rather than counted as free.
 
 If you are on a Pro/Max subscription these numbers tell you what the same work
 would have cost through the API — they are not what you are charged. Anthropic

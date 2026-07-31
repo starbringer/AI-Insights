@@ -40,8 +40,22 @@ export interface UsageAdvice {
   params: Record<string, number | string>;
 }
 
-const emptyRollup = (): BucketRollup =>
+export const emptyRollup = (): BucketRollup =>
   ({ tokens: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0, costUsd: 0 });
+
+export const emptyBuckets = (): Record<UsageBucket, BucketRollup> => ({
+  base: emptyRollup(), mcp: emptyRollup(), skills: emptyRollup(), subagents: emptyRollup(),
+});
+
+/**
+ * Cost-attribution bucket for an API call. Exported so the comparison tools
+ * classify turns exactly as the run-detail Usage tab does — the split has to
+ * agree, or a before/after delta would not reconcile with the per-run numbers.
+ */
+export function bucketFor(isSubagent: number, bucket: number): UsageBucket {
+  if (isSubagent) return "subagents";
+  return bucket >= 2 ? "skills" : bucket === 1 ? "mcp" : "base";
+}
 
 interface TurnRow {
   ts: string;
@@ -56,8 +70,7 @@ interface TurnRow {
 }
 
 function bucketOf(r: TurnRow): UsageBucket {
-  if (r.is_subagent) return "subagents";
-  return r.bucket >= 2 ? "skills" : r.bucket === 1 ? "mcp" : "base";
+  return bucketFor(r.is_subagent, r.bucket);
 }
 
 export function getRunUsage(db: Database, runId: string): RunUsageReport | null {
@@ -69,9 +82,7 @@ export function getRunUsage(db: Database, runId: string): RunUsageReport | null 
   if (rows.length === 0) return null;
 
   const total = emptyRollup();
-  const byBucket: Record<UsageBucket, BucketRollup> = {
-    base: emptyRollup(), mcp: emptyRollup(), skills: emptyRollup(), subagents: emptyRollup(),
-  };
+  const byBucket = emptyBuckets();
   const byModelMap = new Map<string, BucketRollup>();
   const series: RunUsageReport["series"] = [];
 

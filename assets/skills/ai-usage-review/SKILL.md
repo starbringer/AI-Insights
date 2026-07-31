@@ -97,3 +97,7 @@ dead hook, adding an allowlist entry) and offer to apply them. On acceptance,
 make each change with your own edit tools, one at a time, showing the diff.
 
 Re-run the relevant tool afterwards to confirm the numbers moved.
+
+Then tell the user how to check the estimate against reality: the
+`ai-change-impact` skill compares recorded usage before and after a change and
+reports what it actually saved. Note the date, so the split point is known.
