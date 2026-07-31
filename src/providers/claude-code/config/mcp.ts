@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { countTokensInObject } from "../../../tokenizer";
 import { getThresholds, statusForValue, type Status } from "../../../thresholds";
 import { CLAUDE_JSON_PATH } from "../../../paths";
-import type { McpToolInfo, McpServerInfo, McpReport } from "../../../config/types";
+import type { McpToolInfo, McpServerInfo, McpServerDefInfo, McpReport } from "../../../config/types";
 
 // ============================================================================
 // MCP report — enumerates servers from Claude Code's CONFIG FILES, never from
@@ -263,6 +263,25 @@ function enumerateServers(diagnostics: string[]): EnumeratedServer[] {
   }
 
   return found;
+}
+
+/**
+ * The configured servers, definition only — no probe, no process spawned.
+ *
+ * Used by the harness snapshot log, which runs on a timer and after every config
+ * write, and must produce the same answer from the dashboard and the stdio server
+ * alike. `getMcpReport` cannot be used there: it probes, and its cache is
+ * per-process, so a cold process would spawn every stdio server just to look.
+ */
+export function listMcpServerDefs(): McpServerDefInfo[] {
+  const diagnostics: string[] = [];
+  return enumerateServers(diagnostics).map(e => ({
+    name: e.name,
+    scope: e.scope,
+    ...(e.def ? { type: defType(e.def), command: defDisplayCommand(e.def) } : {}),
+    source: e.source,
+    ...(e.project ? { project: e.project } : {}),
+  }));
 }
 
 export async function getMcpReport(forceRefresh = false): Promise<McpReport> {

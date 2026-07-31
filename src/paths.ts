@@ -62,6 +62,17 @@ export function pathKey(p: string): string {
   return process.platform === "win32" ? p.toLowerCase() : p;
 }
 
+/**
+ * SQL suffix for comparing a stored path column, matching pathKey's rule.
+ *
+ * Append to an equality test on `cwd`: `WHERE cwd = ?${PATH_COLLATE}`. Needed
+ * because Claude Code records the cwd with whatever drive-letter case the
+ * session was launched with, so `G:\proj` and `g:\proj` are one directory that a
+ * plain `=` treats as two. Filtering a cost comparison to a project must not
+ * silently drop half the runs — that produces a wrong number, not a short list.
+ */
+export const PATH_COLLATE = process.platform === "win32" ? " COLLATE NOCASE" : "";
+
 export interface TranscriptPathInfo {
   isSubagent: boolean;
   parentAgentId: string | null;

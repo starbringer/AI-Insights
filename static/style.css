@@ -568,6 +568,25 @@ tbody tr:hover td { background: var(--accent-soft); }
   vertical-align: middle;
 }
 
+/* The run's public id, click-to-copy: it exists to be pasted into the
+   comparison tools, so reading it off the screen is not the job. */
+.run-key {
+  border: none;
+  border-radius: 4px;
+  padding: 3px 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: .2px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .15s ease, box-shadow .15s ease;
+}
+.run-key:hover { color: var(--accent); box-shadow: var(--nm-inset-sm); }
+.run-key:active { box-shadow: var(--nm-pressed); }
+.run-key.copied { color: var(--c-green); box-shadow: var(--nm-inset-sm); }
+
 /* =================================================================
    Settings
    ================================================================= */

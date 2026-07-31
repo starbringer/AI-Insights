@@ -112,6 +112,7 @@ export interface PruneResult {
   events: number;
   agents: number;
   runs: number;
+  snapshots: number;
 }
 
 function changesOf(result: unknown): number {
@@ -135,7 +136,7 @@ function changesOf(result: unknown): number {
  */
 export function pruneOldData(db: Database): PruneResult {
   const cutoff = retentionCutoffIso();
-  const result: PruneResult = { cutoff, turns: 0, events: 0, agents: 0, runs: 0 };
+  const result: PruneResult = { cutoff, turns: 0, events: 0, agents: 0, runs: 0, snapshots: 0 };
 
   db.transaction(() => {
     result.turns  = changesOf(db.run(`DELETE FROM turns  WHERE ts < ?`, [cutoff]));
@@ -151,6 +152,18 @@ export function pruneOldData(db: Database): PruneResult {
     ));
     result.runs = changesOf(db.run(
       `DELETE FROM runs WHERE run_id NOT IN (SELECT run_id FROM agents)`,
+    ));
+    // Harness snapshots age out too, with one exception: the newest row that
+    // predates the cutoff is the baseline the oldest retained period is diffed
+    // against, so dropping it would leave that period unattributable.
+    result.snapshots = changesOf(db.run(
+      `DELETE FROM harness_snapshots
+        WHERE captured_at < ?
+          AND id NOT IN (
+            SELECT MAX(id) FROM harness_snapshots WHERE captured_at < ?
+             GROUP BY provider, project
+          )`,
+      [cutoff, cutoff],
     ));
   })();
 

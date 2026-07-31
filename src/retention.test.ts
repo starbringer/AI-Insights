@@ -103,6 +103,9 @@ function seedDb(): Database {
   db.run(`CREATE TABLE events (id INTEGER PRIMARY KEY, agent_id TEXT, ts TEXT)`);
   db.run(`CREATE TABLE agents (agent_id TEXT PRIMARY KEY, run_id TEXT, started_at TEXT, last_seen_at TEXT)`);
   db.run(`CREATE TABLE runs (run_id TEXT PRIMARY KEY, last_seen_at TEXT)`);
+  db.run(`CREATE TABLE harness_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT, project TEXT, captured_at TEXT
+  )`);
   return db;
 }
 
@@ -176,5 +179,38 @@ describe("pruneOldData", () => {
 
     expect(db.query(`SELECT COUNT(*) as n FROM agents`).get()).toEqual({ n: 1 });
     expect(db.query(`SELECT COUNT(*) as n FROM runs`).get()).toEqual({ n: 1 });
+  });
+
+  test("the newest pre-cutoff harness snapshot survives as a baseline", () => {
+    // Aged-out snapshots go, EXCEPT the latest one before the cutoff: it is what
+    // the oldest retained period is diffed against, so losing it would leave
+    // that period's cost change unattributable.
+    const db = seedDb();
+    const older = "2000-01-01T00:00:00.000Z";
+    const newer = "2000-06-01T00:00:00.000Z";
+    db.run(`INSERT INTO harness_snapshots (provider,project,captured_at) VALUES ('cc',NULL,?)`, [older]);
+    db.run(`INSERT INTO harness_snapshots (provider,project,captured_at) VALUES ('cc',NULL,?)`, [newer]);
+    db.run(`INSERT INTO harness_snapshots (provider,project,captured_at) VALUES ('cc',NULL,?)`, [NOW]);
+
+    const res = pruneOldData(db);
+
+    expect(res.snapshots).toBe(1);
+    expect(db.query<{ captured_at: string }, []>(
+      `SELECT captured_at FROM harness_snapshots ORDER BY captured_at`
+    ).all().map(r => r.captured_at)).toEqual([newer, NOW]);
+  });
+
+  test("each provider/project series keeps its own baseline", () => {
+    const db = seedDb();
+    const old = "2000-01-01T00:00:00.000Z";
+    db.run(`INSERT INTO harness_snapshots (provider,project,captured_at) VALUES ('cc',NULL,?)`, [old]);
+    db.run(`INSERT INTO harness_snapshots (provider,project,captured_at) VALUES ('cc','/proj',?)`, [old]);
+    db.run(`INSERT INTO harness_snapshots (provider,project,captured_at) VALUES ('other',NULL,?)`, [old]);
+
+    const res = pruneOldData(db);
+
+    // All three are the sole (and therefore baseline) row of their own series.
+    expect(res.snapshots).toBe(0);
+    expect(db.query(`SELECT COUNT(*) as n FROM harness_snapshots`).get()).toEqual({ n: 3 });
   });
 });

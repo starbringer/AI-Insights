@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getDb } from "../db";
 import { CONFIG_ADAPTERS, configAdapterFor } from "../config";
 import { buildDependencyGraph } from "../config/graph";
+import { captureAll } from "../config/snapshots";
 import type { ToolConfigAdapter } from "../config/types";
 
 // ============================================================================
@@ -31,6 +32,18 @@ configRouter.use("*", async (c, next) => {
     }, 400);
   }
   await next();
+
+  // Any successful write changed the harness, so fingerprint it now rather than
+  // waiting up to 15 minutes for the periodic capture — that keeps the change
+  // timeline dated to the edit itself. Applied here so it covers every write
+  // route, present and future. A failed snapshot must never fail the write.
+  if (c.req.method !== "GET" && c.res.status < 400) {
+    const providerId = adapterOr501(c)?.providerId;
+    if (providerId) {
+      try { captureAll(getDb(), providerId); }
+      catch (e) { console.error("[harness] post-write snapshot failed:", e); }
+    }
+  }
 });
 
 const notSupported = { error: "not supported by this provider" } as const;

@@ -4,6 +4,7 @@ import { DATA_DIR } from "./src/paths";
 import { getDb } from "./src/db";
 import { PROVIDERS } from "./src/providers";
 import { getRetentionDays, pruneOldData } from "./src/retention";
+import { captureAll } from "./src/config/snapshots";
 import { handleMessage, expectsResponse, SERVER_NAME, SERVER_VERSION } from "./src/mcp/protocol";
 
 // ============================================================================
@@ -55,6 +56,19 @@ try {
   log(`retention: keeping ${getRetentionDays()} days (pruned ${pruned.turns} turns, ${pruned.events} events)`);
 } catch (e) {
   log(`retention sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+}
+
+// Fingerprint the harness for the same reason: on a machine where the dashboard
+// is never started, this is the only chance to record what the config looked
+// like, and the comparison tools can only attribute a change they saw happen.
+// Synchronous and probe-free, so it costs a few file reads and cannot be lost to
+// the process exiting first.
+for (const provider of PROVIDERS) {
+  try {
+    if (captureAll(db, provider.id)) log(`harness snapshot recorded for ${provider.id}`);
+  } catch (e) {
+    log(`harness snapshot failed for ${provider.id}: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 log(`v${SERVER_VERSION} ready on stdio (${PROVIDERS.length} provider(s) registered)`);

@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { upsertRun } from "./cache";
+import { backfillRunKeys } from "./runKey";
+import { PATH_COLLATE } from "../paths";
 import type { ProviderFilter } from "./aggregate";
 
 /**
@@ -118,12 +120,19 @@ export function refreshRuns(db: Database, provider: string): void {
       });
     }
   })();
+
+  // After the roll-up, so newly inserted runs get their public id. Runs through
+  // the shared helper rather than each provider's parser — a new provider gets
+  // keys, and therefore comparison, with no extra code.
+  backfillRunKeys(db, provider);
 }
 
 // ===== Read-side helpers used by the API =====
 
 export interface RunSummary {
   run_id: string;
+  /** Short provider-neutral public id, e.g. "r-9f3a1c2b7e04". See runKey.ts. */
+  run_key: string | null;
   provider: string;
   title: string | null;
   cwd: string | null;
@@ -160,7 +169,7 @@ export function listRuns(db: Database, opts: {
 
   const rows = db.query(
     `SELECT
-       r.run_id, r.provider, r.title, r.cwd, r.project_flat,
+       r.run_id, r.run_key, r.provider, r.title, r.cwd, r.project_flat,
        r.started_at, r.last_seen_at, r.agent_count, r.turn_count,
        COALESCE(t.input, 0)  as input,
        COALESCE(t.cw5m, 0)   as cacheCreate5m,
@@ -213,6 +222,7 @@ export interface AgentSummary {
 export interface RunDetail {
   run: {
     run_id: string;
+    run_key: string | null;
     provider: string;
     title: string | null;
     cwd: string | null;
@@ -227,7 +237,7 @@ export interface RunDetail {
 
 export function loadRun(db: Database, runId: string): RunDetail | null {
   const run = db.query<RunDetail["run"], [string]>(
-    `SELECT run_id, provider, title, cwd, project_flat, started_at, last_seen_at, agent_count, turn_count
+    `SELECT run_id, run_key, provider, title, cwd, project_flat, started_at, last_seen_at, agent_count, turn_count
      FROM runs WHERE run_id = ?`
   ).get(runId);
   if (!run) return null;
@@ -276,6 +286,7 @@ export function getActiveRuns(db: Database, windowMs = 5 * 60_000, provider?: Pr
 
 export interface TopRunStat {
   run_id: string;
+  run_key: string | null;
   title: string | null;
   cwd: string | null;
   agent_count: number;
@@ -290,14 +301,24 @@ export interface TopRunStat {
   total: number;
 }
 
-export function getTopRuns(db: Database, limit = 10, since?: string, provider?: ProviderFilter): TopRunStat[] {
+export function getTopRuns(
+  db: Database, limit = 10, since?: string, provider?: ProviderFilter,
+  until?: string, project?: string,
+): TopRunStat[] {
   // Empty `since` compares <= every ISO timestamp, i.e. no filter.
   const params: (string | number)[] = [since ?? ""];
+  // `until` and `project` are the extra filters a before/after comparison needs
+  // (a bounded past window, scoped to one project). Both omitted by the
+  // dashboard callers, which want an open-ended "since N ago" across everything.
+  const untilAnd = until ? " AND ts < ?" : "";
+  if (until) params.push(until);
   if (provider) params.push(provider);
+  const projectAnd = project ? ` AND run_id IN (SELECT run_id FROM runs WHERE cwd = ?${PATH_COLLATE})` : "";
+  if (project) params.push(project);
   params.push(limit);
   return db.query<TopRunStat, (string | number)[]>(
     `SELECT
-       r.run_id, r.title, r.cwd, r.last_seen_at, r.agent_count, r.turn_count,
+       r.run_id, r.run_key, r.title, r.cwd, r.last_seen_at, r.agent_count, r.turn_count,
        t.model, t.input, t.cacheCreate5m, t.cacheCreate1h, t.cacheRead, t.output, t.total
      FROM runs r
      INNER JOIN (
@@ -310,7 +331,7 @@ export function getTopRuns(db: Database, limit = 10, since?: string, provider?: 
          SUM(output_tokens)   as output,
          SUM(input_tokens + cache_create_5m + cache_create_1h + cache_read + output_tokens) as total
        FROM turns
-       WHERE ts >= ?${provider ? " AND provider = ?" : ""}
+       WHERE ts >= ?${untilAnd}${provider ? " AND provider = ?" : ""}${projectAnd}
        GROUP BY run_id
      ) t ON r.run_id = t.run_id
      ORDER BY t.total DESC

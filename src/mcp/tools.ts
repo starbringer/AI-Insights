@@ -16,6 +16,10 @@ import {
 import { listRuns, loadRun, getTopRuns, getActiveRuns } from "../transcripts/runs";
 import { getRunUsage } from "../transcripts/usageReport";
 import type { UsageAdvice } from "../transcripts/usageReport";
+import { resolveRunKey } from "../transcripts/runKey";
+import { compareRuns, comparePeriods, getRunComponents } from "../transcripts/compare";
+import { resolveWindow } from "../transcripts/window";
+import { harnessChangeLog } from "../config/snapshots";
 
 // ============================================================================
 // MCP tool registry.
@@ -73,6 +77,40 @@ const rangeProp = {
 const limitProp = (fallback: number) => ({
   limit: { type: "integer", minimum: 1, maximum: 500, description: `Max rows. Default ${fallback}.` },
 });
+
+const runIdDesc =
+  'A run_key from list_runs ("r-9f3a1c2b7e04"), any unique prefix of one ("r-9f3a"), ' +
+  "or the provider's own native run id.";
+
+/** A bounded past window. Both bounds accept the same forms. */
+const boundDesc =
+  'ISO timestamp, a date ("2026-07-15"), or a relative offset meaning "ago" ("7d", "24h"). ' +
+  "Dates cover the whole local day.";
+
+const windowProp = (name: string, what: string) => ({
+  [name]: {
+    type: "object",
+    description: what,
+    properties: {
+      from: { type: "string", description: `Start of the window. ${boundDesc}` },
+      until: { type: "string", description: `End of the window, exclusive. Defaults to now. ${boundDesc}` },
+    },
+    required: ["from"],
+    additionalProperties: false,
+  },
+});
+
+/** Pull a {from, until} object out of raw tool args. */
+function windowArg(args: Record<string, unknown>, key: string): { from?: string; until?: string } {
+  const raw = args[key];
+  if (raw === undefined || raw === null) throw new Error(`"${key}" is required`);
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`"${key}" must be an object like {"from": "2026-07-15", "until": "2026-07-22"}`);
+  }
+  const o = raw as Record<string, unknown>;
+  const pick = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : undefined);
+  return { from: pick("from"), until: pick("until") };
+}
 
 // ---- argument helpers -------------------------------------------------------
 
@@ -260,7 +298,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: "list_runs",
     title: "List sessions",
     description:
-      "Paginated list of recorded sessions (a run = one logical session, containing one or more agents). Each row carries title, project, agent/turn counts, token totals and last-active time.",
+      "Paginated list of recorded sessions (a run = one logical session, containing one or more agents). Each row carries its run_key — the short stable id (\"r-9f3a1c2b7e04\") to pass to compare_runs — plus title, project, agent/turn counts, token totals and last-active time.",
     inputSchema: {
       type: "object",
       properties: {
@@ -287,15 +325,15 @@ export const MCP_TOOLS: McpToolDef[] = [
       "One run with every agent it contains (including spawned sub-agents), each with its model, turn count and token totals.",
     inputSchema: {
       type: "object",
-      properties: { ...providerProp, runId: { type: "string", description: "Run id from list_runs." } },
+      properties: { ...providerProp, runId: { type: "string", description: runIdDesc } },
       required: ["runId"],
       additionalProperties: false,
     },
     handler: args => {
-      const p = providerFilter(args);
-      const detail = loadRun(getDb(), requiredStr(args, "runId"));
+      const db = getDb();
+      const { runId } = resolveRunKey(db, requiredStr(args, "runId"), providerFilter(args));
+      const detail = loadRun(db, runId);
       if (!detail) throw new Error("run not found");
-      if (p && detail.run.provider !== p) throw new Error("run not found for this provider");
       return detail;
     },
   },
@@ -308,31 +346,30 @@ export const MCP_TOOLS: McpToolDef[] = [
       type: "object",
       properties: {
         ...providerProp,
-        runId: { type: "string", description: "Run id from list_runs." },
+        runId: { type: "string", description: runIdDesc },
         includeSeries: {
           type: "boolean",
           description: "Include the per-API-call cost series (can be hundreds of rows). Default false.",
+        },
+        includeComponents: {
+          type: "boolean",
+          description: "Include which skills, MCP servers and tools this run actually invoked, with estimated injected tokens. Default false.",
         },
       },
       required: ["runId"],
       additionalProperties: false,
     },
     handler: args => {
-      const p = providerFilter(args);
-      const runId = requiredStr(args, "runId");
       const db = getDb();
-      if (p) {
-        const owner = db.query<{ provider: string }, [string]>(
-          `SELECT provider FROM runs WHERE run_id = ?`
-        ).get(runId);
-        if (owner && owner.provider !== p) throw new Error("run not found for this provider");
-      }
-      const report = getRunUsage(db, runId);
+      const resolved = resolveRunKey(db, requiredStr(args, "runId"), providerFilter(args));
+      const report = getRunUsage(db, resolved.runId);
       if (!report) throw new Error("run not found");
       const { series, advice, ...rest } = report;
       return {
+        runKey: resolved.runKey,
         ...rest,
         advice: renderAdvice(advice),
+        ...(bool(args, "includeComponents") ? { components: getRunComponents(db, resolved.runId) } : {}),
         ...(bool(args, "includeSeries") ? { series } : { seriesOmitted: series.length }),
       };
     },
@@ -365,6 +402,104 @@ export const MCP_TOOLS: McpToolDef[] = [
     handler: args => ({
       turns: getTopTurns(getDb(), Math.min(int(args, "limit", 10), 500), providerFilter(args)),
     }),
+  },
+
+  // ---- Change impact: did an improvement actually save anything? ----
+  {
+    name: "compare_runs",
+    title: "Compare two sessions",
+    description:
+      "Cost delta between two specific runs, decomposed into the three factors that can move it: how many API calls were made, how many tokens each call carried, and what the model/cache blend priced them at. The three sum exactly to the delta. Also returns which skills, MCP servers and tools each run used, what changed in the harness config between them, and machine-generated caveats about how far the result can be trusted. Use after re-running a task to check whether a change to CLAUDE.md, a skill, an MCP server or a workflow paid off. The two runs may come from different providers, which makes this a tool-vs-tool comparison instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...providerProp,
+        runA: { type: "string", description: `First run. ${runIdDesc}` },
+        runB: { type: "string", description: `Second run. ${runIdDesc} Order does not matter — the earlier-starting run is used as the baseline.` },
+        includeComponents: {
+          type: "boolean",
+          description: "Include the full per-tool call histogram for each run. Default true; set false for a compact answer.",
+        },
+      },
+      required: ["runA", "runB"],
+      additionalProperties: false,
+    },
+    handler: args => {
+      const result = compareRuns(
+        getDb(), requiredStr(args, "runA"), requiredStr(args, "runB"), providerFilter(args),
+      );
+      if (bool(args, "includeComponents", true)) return result;
+      const strip = (s: typeof result.before) => {
+        const { components, ...rest } = s;
+        return { ...rest, componentSummary: { toolCalls: components.toolCalls, toolTokens: components.toolTokens } };
+      };
+      return { ...result, before: strip(result.before), after: strip(result.after) };
+    },
+  },
+  {
+    name: "compare_periods",
+    title: "Compare two time periods",
+    description:
+      "Everything recorded in one window against everything in another: totals, per-model and per-bucket splits, cache hit rate, and the normalized rates (cost per run, cost per API call, tokens per call) that make windows of unequal size comparable. Returns the same exact three-factor attribution as compare_runs, plus what changed in the harness between the windows. Use when the user improved something and then just kept working rather than re-running one task — the question being whether the new normal is cheaper. Windows are half-open [from, until) so adjacent periods tile without double counting. Asking for a window older than the retention setting is an error, not an empty result, because that data has been deleted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...providerProp,
+        ...windowProp("before", "The baseline period, before the change."),
+        ...windowProp("after", "The period after the change."),
+        project: { type: "string", description: "Restrict both sides to one project directory (exact cwd, from list_config_projects)." },
+        includeHarnessDiff: {
+          type: "boolean",
+          description: "Diff the harness fingerprint between the two windows to name what changed. Default true. Needs a specific provider, not \"all\".",
+        },
+        ...limitProp(5),
+      },
+      required: ["before", "after"],
+      additionalProperties: false,
+    },
+    handler: args => comparePeriods(
+      getDb(),
+      resolveWindow(windowArg(args, "before"), "before window"),
+      resolveWindow(windowArg(args, "after"), "after window"),
+      {
+        provider: providerFilter(args),
+        project: str(args, "project"),
+        topRunLimit: Math.min(int(args, "limit", 5), 500),
+        includeHarnessDiff: bool(args, "includeHarnessDiff", true),
+      },
+    ),
+  },
+  {
+    name: "get_harness_changes",
+    title: "Harness change timeline",
+    description:
+      "When the harness configuration actually changed, and what changed — instruction files, skills, commands, hooks, MCP servers, permissions and settings layers, each with its token delta. Call this FIRST when the user says \"did my change help\" but not when they made it: the timeline supplies the split point for compare_periods instead of asking them to remember. Recorded from periodic fingerprints, so an edit is dated to the next capture after it (within 15 minutes). Nothing before the app first ran is known, and entries age out with the retention window.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...providerProp,
+        ...rangeProp,
+      },
+      additionalProperties: false,
+    },
+    handler: args => {
+      const p = providerFilter(args);
+      // Config is inherently per-tool; "all" has no single harness to diff.
+      const provider = p && p !== "all" ? p : (listProviders()[0]?.id ?? "claude-code");
+      const range = rangeOf(args);
+      const entries = harnessChangeLog(
+        getDb(), provider, rangeSinceIso(range), new Date().toISOString(),
+      );
+      return {
+        provider,
+        range,
+        changePoints: entries.length,
+        entries,
+        ...(entries.length === 0
+          ? { note: "No harness change recorded in this window. Either nothing changed, or the change predates the snapshot log — it starts when this app first ran." }
+          : {}),
+      };
+    },
   },
   {
     name: "get_mcp_usage",

@@ -5,7 +5,7 @@ import { getInstructionsReport, readInstructionFile, writeInstructionFile } from
 import { listCommands, writeCommandFile, createCommand, deleteCommand } from "./commands";
 import { listSkills, writeSkillFile } from "./skills";
 import { listHooks, readHookScript, writeHookScript, deleteHook } from "./hooks";
-import { getMcpReport } from "./mcp";
+import { getMcpReport, listMcpServerDefs } from "./mcp";
 import { getPermissionModel } from "./permissions";
 import { listMemoryStores } from "./memory";
 import { getEffectiveConfig } from "./effective";
@@ -60,6 +60,7 @@ export const claudeCodeConfigAdapter: ToolConfigAdapter = {
     ).get(retentionCutoffIso())?.n ?? 0;
     return { ...report, agents, windowDays: getRetentionDays() };
   },
+  mcpServerDefs: listMcpServerDefs,
 
   listMemoryStores,
 

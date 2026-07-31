@@ -138,8 +138,28 @@ export interface ToolConfigAdapter {
 2. 在 [`src/config/index.ts`](../src/config/index.ts) 的 `CONFIG_ADAPTERS` 中注册。
 3. 到此为止。标签页、路由、MCP 工具和依赖图都会跟随 `capabilities()` 的声明自动适配。
 
+**你可以免费获得的东西。** 成本估算只依赖模型名字符串，因此价格表无需改动。run key 在
+`refreshRuns` 中计算，而你的解析器本来就会调用它，所以 `compare_runs` 对你的运行直接可用
+—— 甚至可以和 Claude Code 的运行对比，因为每个 ID 各自解析自己的 provider。时间段对比
+只读共享的 `turns` 与 `events` 表。Harness 快照来自你的适配器输出的中性结构：实现的能力
+越多，变更时间线就越精确；一个都不实现，对比依然可用，只是没有「改了什么」的归因。唯一
+值得刻意实现的是解析时的 `turns.bucket`（0 = 基础，1 = MCP，2 = skill），它驱动分类桶拆解。
+
 **自动装配（可选）：** 在适配器上实现 `isInstalled`、`installSkill` 和
 `registerMcpServer`，内置技能与 MCP 注册就会一并推送到该工具。见[自动装配](#自动装配)。
+
+## Harness 快照
+
+`src/config/snapshots.ts` 为 harness 生成指纹，使前后对比能说清改了什么。它完全通过
+`ToolConfigAdapter` 读取，并由 `capabilities()` 把关 —— 这正是它与具体工具解耦的原因。
+
+有两条约束决定了它的形态。它必须**便宜** —— 它跑在 15 分钟的定时器上、每次启动时
+（包括生命周期很短的 stdio 入口）以及每次写入配置之后。它还必须**跨进程稳定**，否则同一份
+配置在仪表盘和 stdio 服务器上会算出不同哈希，被误判为一次变更。这两点都排除了探测 MCP
+服务器，因此适配器在 `mcpReport()` 之外还提供 `mcpServerDefs()`：只读定义，不启动子进程，
+不依赖进程内缓存。
+
+写入以指纹为门槛，因此一套稳定的配置总共只会产生一行记录。
 
 ## MCP 服务器
 

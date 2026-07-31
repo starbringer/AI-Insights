@@ -146,9 +146,34 @@ Two layering rules that are not plain last-wins:
 3. Nothing else. The tabs, routes, MCP tools and graph adapt to whatever
    `capabilities()` says.
 
+**What you get for free.** Cost estimation keys off the model string alone, so
+pricing needs no changes. Run keys are computed in `refreshRuns`, which your
+parser already calls, so `compare_runs` works on your runs — including against a
+Claude Code run, since each id resolves its own provider. Period comparison reads
+only the shared `turns` and `events` tables. Harness snapshots come from your
+adapter's neutral shapes: implement more capabilities and the change timeline gets
+more precise, implement none and comparisons still work without the "what changed"
+attribution. The one thing worth implementing deliberately is `turns.bucket`
+(0 = base, 1 = MCP, 2 = skill) at parse time, since it drives the bucket split.
+
 **Provisioning (optional):** implement `isInstalled`, `installSkill` and
-`registerMcpServer` on the adapter and the bundled skill plus the MCP
+`registerMcpServer` on the adapter and the bundled skills plus the MCP
 registration are pushed to that tool too. See [Provisioning](#provisioning).
+
+## Harness snapshots
+
+`src/config/snapshots.ts` fingerprints the harness so a before/after comparison
+can name what changed. It reads exclusively through `ToolConfigAdapter`, guarded
+by `capabilities()`, which is what makes it provider-agnostic.
+
+Two constraints shape it. It must be **cheap** — it runs on a 15-minute timer, on
+every startup (including the short-lived stdio entry point) and after every config
+write. And it must be **stable across processes**, or the same configuration would
+hash differently from the dashboard and the stdio server and register as a phantom
+change. Both rule out probing MCP servers, so the adapter exposes `mcpServerDefs()`
+alongside `mcpReport()`: definitions only, no subprocess, no per-process cache.
+
+Writes are gated on the fingerprint, so a stable setup costs one row ever.
 
 ## The MCP server
 
